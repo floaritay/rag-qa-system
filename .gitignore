@@ -1,0 +1,7 @@
+# 忽略向量库文件夹
+course_knowledge_base/
+# 忽略环境变量配置文件（若有）
+.env
+# 忽略PDF源文件
+course_materials/
+.trae/

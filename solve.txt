@@ -1,0 +1,228 @@
+# 问题解决记录
+
+## 问题1：嵌入模型404错误
+
+### 遇到的问题
+- 错误信息：`创建向量库失败: Error code: 404 - {'error': {'code': 'InvalidEndpointOrModel.NotFound', 'message': 'The model or endpoint text-embedding-ada-002 does not exist or you do not have access to it.'}}`
+
+### 分析
+- 系统默认使用了OpenAI的`text-embedding-ada-002`模型，但火山方舟平台上不存在此模型
+
+### 解决方法
+- 修改代码，使用火山方舟平台提供的嵌入模型端点
+- 在`OpenAIEmbeddings`初始化中添加`model`参数，指定正确的模型端点
+
+### 主要改动
+- 在`init_vectorstore`函数中，为`OpenAIEmbeddings`添加`model="ep-20260312175639-6544h"`参数
+- 在`create_vectorstore`函数中，同样添加模型参数
+
+## 问题2：文本块数量超过限制
+
+### 遇到的问题
+- 错误信息：`创建向量库失败: Error code: 400 - {'error': {'code': 'InvalidParameter', 'message': 'The parameter `input` specified in the request are not valid: array too long, expected an array with maximum length 256, but got an array with length 291 instead.'}}`
+
+### 分析
+- 火山方舟的嵌入模型对单次请求的文本块数量有限制，最多传256个文本块
+- 课程资料分割后生成了291个文本块，超出了限制
+
+### 解决方法
+- 实现批量处理文本块的逻辑，每次处理不超过256个
+- 对于第一批文本块，创建新的FAISS向量库
+- 对于后续批次，创建临时向量库并合并到主向量库
+
+### 主要改动
+- 修改`create_vectorstore`函数，添加批量处理逻辑
+- 每次处理256个文本块，循环直到处理完所有文本
+- 添加处理进度输出
+
+## 问题3：输入参数格式错误
+
+### 遇到的问题
+- 错误信息：`创建向量库失败: Error code: 400 - {'error': {'code': 'InvalidParameter', 'message': 'The parameter `input[0]` specified in the request are not valid: expected a string, but got `[86461 68464 ...]` instead.'}}`
+
+### 分析
+- 火山方舟的嵌入模型要求input参数是字符串类型，但传入的是数字数组
+- 文本分割后的数据格式不正确，可能被错误处理成了字符编码数组
+
+### 解决方法
+- 添加代码来确保texts是Document对象列表
+- 在不是Document对象时进行转换
+- 跳过非字符串元素
+
+### 主要改动
+- 在`create_vectorstore`函数中，添加对texts类型的检查
+- 导入`Document`类
+- 实现从字符串到Document对象的转换逻辑
+
+## 问题4：火山方舟平台兼容性问题
+
+### 遇到的问题
+- 错误信息：`创建向量库失败: Error code: 400 - {'error': {'code': 'InvalidParameter', 'message': 'The parameter `input[0]` specified in the request are not valid: expected a string, but got `[86461 68464 ...]` instead.'}}`
+
+### 分析
+- 火山方舟虽然宣称兼容OpenAI API，但实际对Embedding接口的参数要求和OpenAI完全不同
+- OpenAIEmbeddings类生成的请求格式，火山方舟的Embedding接口不识别
+- 导致传入的字符串被错误编码成数字数组
+
+### 解决方法
+- 切换到百炼平台，使用百炼平台的API
+- 百炼平台提供了更兼容OpenAI API的接口
+- 使用百炼平台的嵌入模型和语言模型
+
+### 主要改动
+- 添加百炼平台配置参数
+- 修改init_vectorstore函数，使用百炼平台的API
+- 修改create_vectorstore函数，使用百炼平台的嵌入模型
+- 修改ask_question和init_knowledge_base函数，使用百炼平台的API密钥
+
+## 问题5：阿里云百炼平台配置问题
+
+### 遇到的问题
+- 错误信息：`创建向量库失败: Error code: 401 - {'error': {'code': 'invalid_api_key', 'param': None, 'type': 'invalid_request_error', 'message': 'Incorrect API key provided. You can find your API key at `https://platform.baichuan-ai.com/console/apikey.` '}}`
+
+### 分析
+- 阿里云百炼平台需要正确的配置参数
+- 接口地址和模型名称需要正确设置
+
+### 解决方法
+- 确保使用正确的接口地址：https://dashscope.aliyuncs.com/compatible-mode/v1
+- 使用正确的模型名称：text-embedding-v2（嵌入模型）和xxx（语言模型）
+
+### 主要改动
+- 在create_vectorstore函数中，为OpenAIEmbeddings添加api_type="dashscope"参数（不需要，过时了）
+- 确保使用正确的接口地址和模型名称
+
+## 问题6：文本格式异常问题
+
+### 遇到的问题
+- 错误信息：`创建向量库失败: Error code: 400 - {'error': {'message': '<400> InternalError.Algo.InvalidParameter: Value error, contents is neither str nor list of str.: input.contents', 'type': 'InvalidParameter', 'param': None, 'code': 'InvalidParameter'}}`
+
+### 分析
+- 阿里云百炼的Embedding接口要求input.contents必须是纯字符串或字符串列表
+- PDF解析后的文本可能包含不可见的二进制字符或编码错误
+- 之前的字符串转换没有彻底清理文本内容
+- OpenAIEmbeddings类可能对请求格式做了额外处理，导致阿里云百炼无法识别
+
+### 解决方法
+- 直接调用阿里云百炼的Embedding API，完全控制请求格式
+- 创建自定义Embeddings类，实现LangChain的Embeddings接口
+- 确保发送给API的是纯字符串列表
+- 保留批量处理逻辑，确保符合API的256个文本块限制
+
+### 主要改动
+- 在create_vectorstore函数中，添加直接调用阿里云百炼API的逻辑
+- 创建CustomEmbeddings类，实现embed_documents和embed_query方法
+- 使用requests库直接发送HTTP请求，确保请求格式正确
+- 保留文本清理逻辑，确保所有文本块都是纯字符串格式
+
+## 问题7：批次大小限制问题
+
+### 遇到的问题
+- 错误信息：`调用Embedding API失败: 400 Client Error: Bad Request for url: https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings`
+- 响应内容：`{"error":{"message":"<400> InternalError.Algo.InvalidParameter: Value error, batch size is invalid, it should not be larger than 25.: input.contents"}}`
+
+### 分析
+- 参考文档：https://bailian.console.aliyun.com/cn-beijing/?spm=5176.29619931.J_SEsSjsNv72yRuRFS2VknO.2.2a5610d7c1Gxp0&tab=api#/api/?type=model&url=2846066
+- 阿里云百炼text-embedding-v2模型的批次上限不是256，而是25
+- 之前使用的256是火山方舟的限制，不适用阿里云百炼
+- 批次大小设置错误导致API调用失败
+
+### 解决方法
+- 将batch_size从256改为25，符合阿里云百炼的API限制
+- 添加错误处理逻辑，避免在API调用失败时出现'NoneType' object is not subscriptable错误
+
+### 主要改动
+- 修改create_vectorstore函数，将batch_size设置为25
+- 在CustomEmbeddings类的embed_documents方法中添加错误处理
+- 确保在API调用失败时返回空列表，避免后续操作出错
+
+## 问题8：向量库加载失败问题
+
+### 遇到的问题
+- 错误信息：`初始化向量库失败: The de-serialization relies loading a pickle file. Pickle files can be modified to deliver a malicious payload that results in execution of arbitrary code on your machine.You will need to set `allow_dangerous_deserialization` to `True` to enable deserialization.`
+
+### 分析
+- FAISS向量库存储使用了pickle文件格式
+- 为了安全，LangChain默认禁用了pickle文件的反序列化
+- 需要显式设置allow_dangerous_deserialization=True来加载向量库
+
+### 解决方法
+- 在FAISS.load_local方法中添加allow_dangerous_deserialization=True参数
+- 确保只从可信的来源加载向量库文件
+
+### 主要改动
+- 修改init_vectorstore函数，在FAISS.load_local调用中添加allow_dangerous_deserialization=True参数
+
+## 问题9：阿里云百炼Embedding API请求格式错误
+
+### 遇到的问题
+- 错误信息：`{"detail":"Error code: 400 - {'error': {'message': '<400> InternalError.Algo.InvalidParameter: Value error, contents is neither str nor list of str.: input.contents', 'type': 'InvalidParameter', 'param': None, 'code': 'InvalidParameter'}, 'id': '6ecda2c2-32d0-989b-97fe-56e1eeb6bf62', 'request_id': '6ecda2c2-32d0-989b-97fe-56e1eeb6bf62'}"}`
+
+### 分析
+- 根据阿里云百炼官方文档，Embedding API的`input`参数应该是直接的字符串或字符串列表
+- 正确格式：`{"model": "xxx", "input": ["text1", "text2"]}` 或 `{"model": "xxx", "input": "text"}`
+- 问题的根本原因是`langchain_openai.OpenAIEmbeddings`类发送的请求格式与阿里云百炼API不完全兼容
+- OpenAIEmbeddings类可能会对请求体做额外处理，导致格式不符合阿里云百炼的要求
+
+### 解决方法
+- 创建自定义的`BailianEmbeddings`类，直接调用阿里云百炼API
+- 完全控制请求格式，确保符合阿里云百炼的要求
+- 在`init_vectorstore`函数中使用自定义类替代`OpenAIEmbeddings`
+- 在`create_vectorstore`函数中也使用自定义类
+
+### 主要改动
+- 在文件顶部添加`from langchain_core.embeddings import Embeddings`和`import requests`导入
+- 创建全局的`BailianEmbeddings`类，继承自`Embeddings`
+- 实现`embed_documents`和`embed_query`方法，直接调用阿里云百炼API
+- 修改`init_vectorstore`函数，使用`BailianEmbeddings()`替代`OpenAIEmbeddings`
+- 简化`create_vectorstore`函数，移除内部的`get_embeddings`函数和`CustomEmbeddings`类定义，直接使用全局的`BailianEmbeddings`类
+
+## 问题10：向量库不兼容导致查询无结果
+
+### 遇到的问题
+- API返回`{"answer":"在提供的课程资料中找不到相关信息。","sources":[]}`
+- 明明提供了相关的PDF文件，但系统无法检索到相关信息
+- `/init`端点只加载现有向量库，不会重新创建
+
+### 分析
+- 旧的向量库是用之前的嵌入模型（可能是OpenAI格式）创建的
+- 新的`BailianEmbeddings`类与旧的向量库不兼容
+- 向量维度或编码方式不同，导致检索失败
+- 需要强制重建向量库
+
+### 解决方法
+- 为`init_vectorstore`函数添加`force_rebuild`参数
+- 当`force_rebuild=True`时，删除旧的向量库文件夹，重新创建
+- 修改`/init`端点，支持`force_rebuild`查询参数
+
+### 主要改动
+- 修改`init_vectorstore`函数签名：`def init_vectorstore(force_rebuild=False)`
+- 添加删除旧向量库的逻辑：`shutil.rmtree("course_knowledge_base")`
+- 修改`/init`端点：`async def init_knowledge_base(force_rebuild: bool = False)`
+- 使用方式：`curl -X POST "http://127.0.0.1:8001/init?force_rebuild=true"`
+
+## 问题11：查询显示“在提供的课程资料中找不到相关信息”
+
+### 遇到的问题
+- API返回`{"answer":"在提供的课程资料中找不到相关信息。","sources":[]}`
+- 明明提供了相关的PDF文件，但系统无法检索到相关信息
+
+### 分析
+- 向量库已成功重建（包含 “改进 NSGA-II 算法” 的文本块），但检索环节未匹配到该文本
+- 问题出在「检索参数配置」和「RAG 问答链的提示词 / 检索逻辑」，而非向量库本身。
+- 修改检索器配置（放宽匹配阈值 + 扩大检索范围）
+- 修改检索逻辑（使用自定义提示词）
+
+
+### 解决方法
+- search_kwargs={"k": 3}可以改为search_kwargs={
+        "k": 15,  # 最多返回15个相似文本（默认4，扩大范围）
+        "score_threshold": 0.1  # 相似度阈值设为0.1（越低匹配越宽松，0为完全不匹配）
+    }
+- 修改提示词：如果参考资料中包含与问题相关的内容，哪怕只有部分相关，也要详细回答；只有参考资料完全无相关内容时，才能直接回答“在提供的课程资料中找不到相关信息”
+
+### 主要改动
+- 修改`create_vectorstore`函数的search_kwargs参数
+- 修改提示词
+
+

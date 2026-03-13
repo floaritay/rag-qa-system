@@ -1,0 +1,11 @@
+langchain
+langchain_openai
+langchain_community
+langchain_core
+langchain_text_splitters
+openai
+faiss-cpu
+pypdf
+fastapi
+uvicorn
+pydantic
