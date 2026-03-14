@@ -1,6 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any, Union
+from datetime import datetime
+import uuid
+import time
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -30,6 +34,45 @@ class Query(BaseModel):
 class Response(BaseModel):
     answer: str
     sources: list = []
+
+class OpenAIModel(BaseModel):
+    id: str
+    object: str = "model"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    owned_by: str = "course-assistant"
+
+class OpenAIModelsResponse(BaseModel):
+    object: str = "list"
+    data: List[OpenAIModel]
+
+class OpenAIMessage(BaseModel):
+    role: str
+    content: str
+
+class OpenAIChatRequest(BaseModel):
+    model: str = "course-assistant"
+    messages: List[OpenAIMessage]
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = None
+    stream: Optional[bool] = False
+
+class OpenAIChatChoice(BaseModel):
+    index: int = 0
+    message: OpenAIMessage
+    finish_reason: str = "stop"
+
+class OpenAIUsage(BaseModel):
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+class OpenAIChatResponse(BaseModel):
+    id: str = Field(default_factory=lambda: f"chatcmpl-{uuid.uuid4().hex[:24]}")
+    object: str = "chat.completion"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str = "course-assistant"
+    choices: List[OpenAIChatChoice]
+    usage: OpenAIUsage = OpenAIUsage()
 
 # 自定义Prompt模板
 prompt_template = """你是一个专业的课程助教，请基于以下参考资料回答学生的问题。禁止编造任何信息。
@@ -340,6 +383,52 @@ async def init_knowledge_base(force_rebuild: bool = False):
             return {"status": "success", "message": message}
         else:
             return {"status": "error", "message": "知识库初始化失败，请确保course_materials文件夹中有PDF文件"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/v1/models")
+async def list_models():
+    return OpenAIModelsResponse(
+        data=[
+            OpenAIModel(id="course-assistant")
+        ]
+    )
+
+@app.post("/v1/chat/completions")
+async def chat_completions(request: OpenAIChatRequest):
+    try:
+        global bailian_api_key
+        if not bailian_api_key:
+            raise HTTPException(status_code=503, detail="未设置BAILIAN_API_KEY环境变量")
+        
+        if not rag_chain:
+            if not init_vectorstore():
+                raise HTTPException(status_code=503, detail="向量库未初始化，请先上传课程资料")
+        
+        user_message = ""
+        for msg in request.messages:
+            if msg.role == "user":
+                user_message = msg.content
+                break
+        
+        if not user_message:
+            raise HTTPException(status_code=400, detail="No user message found")
+        
+        answer = rag_chain.invoke(user_message)
+        
+        return OpenAIChatResponse(
+            model=request.model,
+            choices=[
+                OpenAIChatChoice(
+                    message=OpenAIMessage(
+                        role="assistant",
+                        content=answer
+                    )
+                )
+            ]
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

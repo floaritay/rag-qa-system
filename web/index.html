@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能课程助手</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="main-container">
+        <header class="title-area">
+            <h1>📚 智能课程助手</h1>
+            <p>基于 RAG 技术的智能问答系统，帮助您快速查询课程资料中的内容</p>
+        </header>
+
+        <div class="status-bar">
+            <button class="health-btn" id="healthBtn">
+                <span class="btn-icon">🔍</span>
+                检查服务状态
+            </button>
+            <div class="status-box" id="healthStatus"></div>
+        </div>
+
+        <div class="content-area">
+            <div class="chat-area">
+                <div class="chatbot-container" id="chatContainer">
+                    <div class="messages" id="messages">
+                        <div class="welcome-message">
+                            <div class="welcome-icon">💬</div>
+                            <p>您好！我是智能课程助手，请输入您的问题开始对话。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="input-area">
+                    <textarea 
+                        id="questionInput" 
+                        placeholder="💬 请输入您的问题，例如：多AGV调度系统研究的核心算法是什么？"
+                        rows="1"
+                    ></textarea>
+                    <button class="send-btn" id="sendBtn">
+                        发送 ➤
+                    </button>
+                </div>
+
+                <div class="action-bar">
+                    <button class="clear-btn" id="clearBtn">
+                        🗑️ 清空对话
+                    </button>
+                </div>
+            </div>
+
+            <aside class="sidebar">
+                <div class="sidebar-card">
+                    <h3>⚙️ 管理操作</h3>
+                    <button class="rebuild-btn" id="rebuildBtn">
+                        🔄 重建知识库
+                    </button>
+                    <div class="status-box" id="rebuildStatus"></div>
+                </div>
+
+                <div class="sidebar-card">
+                    <h3>📖 使用说明</h3>
+                    <ul>
+                        <li>在下方输入框输入问题</li>
+                        <li>点击"发送"或按回车键</li>
+                        <li>系统将从课程资料中检索相关内容</li>
+                        <li>如答案不准确，可尝试重建知识库</li>
+                    </ul>
+                </div>
+
+                <div class="sidebar-card">
+                    <h3>💡 提示</h3>
+                    <ul>
+                        <li>问题越具体，回答越准确</li>
+                        <li>重建知识库需要较长时间</li>
+                        <li>支持中英文问答</li>
+                    </ul>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <p>正在处理中...</p>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

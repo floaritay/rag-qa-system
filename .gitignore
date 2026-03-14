@@ -5,7 +5,6 @@ course_knowledge_base/
 # 忽略PDF源文件
 course_materials/
 
-web/
 style.md
 style.txt
 .trae/

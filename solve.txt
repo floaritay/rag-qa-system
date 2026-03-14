@@ -275,4 +275,28 @@
 - 日志显示服务确实启动了（"Started server process [1]"），但奇怪的是它卡在了"Waiting for application startup"之后就没有继续了
 
 ### 解决方法
-本地使用Open WebUI或gradio自制UI
+本地使用Open WebUI或gradio自制UI,我都使用了
+
+## 问题16：Open WebUI连接后端API出现网络错误
+
+### 遇到的问题
+- Open WebUI配置连接后端API时显示网络错误
+- 我的Open WebUI在conda环境运行，项目在全局环境运行（不影响）
+
+### 分析
+- 后端API已经配置了CORS（`allow_origins=["*"]`），但API格式不兼容
+- Open WebUI期望的是OpenAI兼容API格式（`/v1/models`和`/v1/chat/completions`端点）
+- 原有后端只有自定义的`/ask`端点，导致验证连接失败
+- 关于环境隔离：conda环境和全局环境互不影响，因为通过网络端口通信
+
+### 解决方法
+- 添加OpenAI兼容的API端点
+- 添加`GET /v1/models`端点返回可用模型列表
+- 添加`POST /v1/chat/completions`端点处理OpenAI格式的聊天请求
+
+### 主要改动
+- 在main.py中添加OpenAI兼容的请求/响应模型（OpenAIModel, OpenAIModelsResponse, OpenAIMessage, OpenAIChatRequest等）
+- 添加`GET /v1/models`端点，返回`course-assistant`和`qwen-plus-2025-07-28`两个模型
+- 添加`POST /v1/chat/completions`端点，处理OpenAI格式的聊天请求
+- 该端点会从messages中提取用户问题，调用RAG链，返回OpenAI格式的响应
+- Open WebUI配置时API地址需要设为`http://localhost:8001/v1`（注意加/v1）

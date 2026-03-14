@@ -1,24 +1,23 @@
 # 智能课程助手
-
 基于 RAG（检索增强生成）技术的智能问答系统，帮助学生快速查询课程资料中的内容。
 
 ## 项目简介
-
-智能课程助手是一个 AI 驱动的问答系统，能够从课程 PDF 资料中检索相关信息并生成准确回答。系统采用前后端分离架构，后端使用 FastAPI + LangChain 构建 RAG 服务，前端使用 Gradio 提供友好的 Web 界面。
+智能课程助手是一个 AI 驱动的问答系统，能够从课程 PDF 资料中检索相关信息并生成准确回答。系统采用前后端分离架构，后端使用 FastAPI + LangChain 构建 RAG 服务，前端支持多种使用方式：
+1. Gradio 提供友好的 Web 界面
+2. 本地安装 Open WebUI
+3. 原生开发（HTML + CSS + JavaScript）（web/ 文件夹）。
 
 ## 技术栈
-
-| 组件     | 技术选型                    |
-| ------ | ----------------------- |
-| 后端框架   | FastAPI                 |
-| RAG 框架 | LangChain               |
-| 向量数据库  | FAISS（本地存储）             |
-| 大语言模型  | 阿里云百炼 qwen-plus         |
-| 嵌入模型   | 阿里云百炼 text-embedding-v2 |
-| 前端界面   | Gradio                  |
+| 组件     | 技术选型                     |
+| ------ | ------------------------ |
+| 后端框架   | FastAPI                  |
+| RAG 框架 | LangChain                |
+| 向量数据库  | FAISS（本地存储）              |
+| 大语言模型  | 阿里云百炼 qwen-plus          |
+| 嵌入模型   | 阿里云百炼 text-embedding-v2  |
+| 前端界面   | Gradio / OpenWebUI /原生界面 |
 
 ## 项目结构
-
 ```
 CV1/
 ├── backend/                    # 后端服务
@@ -29,45 +28,43 @@ CV1/
 ├── frontend/                   # 前端服务
 │   ├── app.py                 # Gradio Web 界面
 │   └── requirements.txt       # Python 依赖
-├── course_materials/           # 课程资料存放目录
+├── course_materials/           # 课程资料存放目录（不存在需手动创建）
 │   └── *.pdf                  # PDF 课程文件
 ├── course_knowledge_base/      # 向量库存储目录（自动生成）
+│   ├── index.faiss        # FAISS 索引文件
+│   └── index.pkl          # FAISS 元数据文件
 ├── DEPLOYMENT_GUIDE.md         # 详细部署指南
+├── web/                        # 原生前端界面代码
+├── solve.txt                   # 问题解决记录
 └── README.md                   # 项目说明文档
 ```
 
 ## 快速开始
 
 ### 环境要求
-
 - Python 3.10+
 - 阿里云百炼平台 API 密钥
 
 ### 安装步骤
-
 1. **克隆项目**
-
 ```bash
 git clone <repository-url>
 cd CV1
 ```
 
-1. **安装后端依赖**
-
+2. **安装后端依赖**
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-1. **安装前端依赖**
-
+3. **安装前端依赖**
 ```bash
 cd ../frontend
 pip install -r requirements.txt
 ```
 
-1. **配置环境变量**
-
+4. **配置环境变量**
 ```bash
 # Windows
 set BAILIAN_API_KEY=你的百炼平台API密钥
@@ -75,44 +72,68 @@ set BAILIAN_API_KEY=你的百炼平台API密钥
 # Linux/Mac
 export BAILIAN_API_KEY=你的百炼平台API密钥
 ```
+或者使用 `.env` 文件
 
-1. **准备课程资料**
+5. **准备课程资料**
+将 PDF 格式的课程资料放入 `course_materials` 文件夹（如果不存在请创建）。
 
-将 PDF 格式的课程资料放入 `course_materials` 文件夹。
-
-1. **启动后端服务**
-
+6. **启动后端服务**
 ```bash
 cd backend
 python main.py
 ```
+后端服务将在 http://localhost:8001 运行。
 
-后端服务将在 <http://localhost:8001> 运行。
-
-1. **启动前端界面**
-
+7. **初始化知识库（首次使用或新增课程资料时）**
 ```bash
-cd frontend
-python app.py
+# 使用 PowerShell
+Invoke-WebRequest -Uri "http://localhost:8001/init" -Method POST
+
+# 或使用 curl
+curl -X POST http://localhost:8001/init
 ```
 
-前端界面将在 <http://localhost:7860> 运行。
+8. **启动前端界面**
+
+   a. **使用 Gradio Web 界面（推荐，快速验证）**
+   ```bash
+   cd frontend
+   python app.py
+   ```
+   前端界面将在 http://localhost:7860 运行。
+
+     b. **使用 Open WebUI**  
+     使用 Open WebUI 访问。参阅 [DEPLOYMENT\_GUIDE.md](./DEPLOYMENT_GUIDE.md)。  
+     
+     c. **使用原生前端界面**  
+     使用原生前端界面访问1. 用浏览器打开 d:\CV1\web\index.html  
+     或启动本地服务器：  
+     ```bash
+     cd d:\CV1\web
+     python -m http.server 8080
+     ```
+     然后访问 http://localhost:8080  
 
 ## API 接口
 
-| 接口        | 方法   | 说明        |
-| --------- | ---- | --------- |
-| `/`       | GET  | 服务信息      |
-| `/health` | GET  | 健康检查      |
-| `/ask`    | POST | 问答接口      |
-| `/init`   | POST | 初始化/重建知识库 |
+| 接口                     | 方法   | 说明              |
+| ---------------------- | ---- | --------------- |
+| `/`                    | GET  | 服务信息            |
+| `/health`              | GET  | 健康检查            |
+| `/ask`                 | POST | 问答接口            |
+| `/init`                | POST | 初始化/重建知识库       |
+| `/v1/models`           | GET  | 返回可用模型列表（OpenAI兼容）  |
+| `/v1/chat/completions` | POST | 处理OpenAI格式的聊天请求（OpenAI兼容） |
 
 ### 问答示例
 
 ```bash
-curl -X POST http://localhost:8001/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "机器学习课程的成绩构成是怎样的？"}'
+# PowerShell
+curl -X POST http://localhost:8001/ask -H "Content-Type: application/json" -d '{"question": "什么是多AGV调度算法？"}'
+
+# CMD
+curl -X POST http://localhost:8001/ask -H "Content-Type: application/json" -d "{\"question\":\"什么是多AGV调度算法？\"}"
+# Windows cmd.exe 中，JSON 数据应该用 双引号 包裹，并且内部的双引号需要转义
 ```
 
 ### 初始化知识库
@@ -121,8 +142,8 @@ curl -X POST http://localhost:8001/ask \
 # 初始化知识库
 curl -X POST http://localhost:8001/init
 
-# 强制重建知识库
-curl -X POST "http://localhost:8001/init?force_rebuild=true"
+# 强制重建知识库（当你放入新的文件时）
+curl -X POST http://localhost:8001/init?force_rebuild=true
 ```
 
 ## 功能特性
@@ -130,8 +151,10 @@ curl -X POST "http://localhost:8001/init?force_rebuild=true"
 - **智能问答**：基于课程资料进行精准问答，回答有据可依
 - **知识库管理**：支持知识库初始化和重建
 - **批量处理**：支持批量加载 PDF 文件构建向量库
-- **美观界面**：现代化的 Gradio Web 界面
+- **多界面选择**：Gradio / Open WebUI / 原生API
+- **OpenAI兼容**：提供OpenAI兼容API，支持Open WebUI等客户端
 - **服务监控**：提供健康检查接口
+- **CORS支持**：已配置跨域支持，允许所有来源访问
 
 ## 工作原理
 
@@ -151,13 +174,18 @@ curl -X POST "http://localhost:8001/init?force_rebuild=true"
 
 ## 详细文档
 
-详细的部署和使用说明请参阅 [DEPLOYMENT\_GUIDE.md](./DEPLOYMENT_GUIDE.md)。
+详细的部署和使用说明请参阅 [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)。
+
+## 常见问题
+
+如有问题，请查看 [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) 中的常见问题部分，或查看 [solve.txt](./solve.txt) 中的问题解决记录。
 
 ## 注意事项
 
 - 确保 `BAILIAN_API_KEY` 环境变量已正确设置
 - 课程资料变更后需调用 `/init` 接口重建知识库
 - 向量库文件存储在 `course_knowledge_base` 目录
+- Open WebUI在conda环境运行，后端在全局环境运行是可以的，它们通过网络端口通信
 
 ## License
 
