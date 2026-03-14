@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
@@ -12,6 +13,14 @@ import uvicorn
 import requests
 
 app = FastAPI(title="课程助手API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 请求体模型
 class Query(BaseModel):
@@ -208,8 +217,10 @@ def create_vectorstore(texts):
     
     # 保存到本地
     if vectorstore:
-        vectorstore.save_local("course_knowledge_base")
-        print("知识库已保存到 course_knowledge_base 文件夹")
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        kb_path = os.path.join(base_dir, "course_knowledge_base")
+        vectorstore.save_local(kb_path)
+        print(f"知识库已保存到 {kb_path} 文件夹")
         return vectorstore
     else:
         print("错误：向量库创建失败")
@@ -237,20 +248,24 @@ def init_vectorstore(force_rebuild=False):
             temperature=0.3
         )
         
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        kb_path = os.path.join(base_dir, "course_knowledge_base")
+        materials_path = os.path.join(base_dir, "course_materials")
+        
         # 如果强制重建，删除旧的向量库
-        if force_rebuild and os.path.exists("course_knowledge_base"):
+        if force_rebuild and os.path.exists(kb_path):
             import shutil
-            shutil.rmtree("course_knowledge_base")
+            shutil.rmtree(kb_path)
             print("已删除旧的向量库，准备重新创建")
         
         # 尝试加载现有向量库（非强制重建时）
-        if not force_rebuild and os.path.exists("course_knowledge_base"):
-            vectorstore = FAISS.load_local("course_knowledge_base", embeddings, allow_dangerous_deserialization=True)
+        if not force_rebuild and os.path.exists(kb_path):
+            vectorstore = FAISS.load_local(kb_path, embeddings, allow_dangerous_deserialization=True)
             print("成功加载现有向量库")
         else:
             # 尝试从course_materials文件夹创建向量库
             try:
-                docs = load_documents("./course_materials")
+                docs = load_documents(materials_path)
                 if docs:
                     texts = split_documents(docs)
                     vectorstore = create_vectorstore(texts)

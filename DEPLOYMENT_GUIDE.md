@@ -56,10 +56,12 @@ python backend\main.py
 
 #### 启动Docker容器
 
+启动docker desktop后，执行以下命令
 ```bash
-docker run -d --network=host -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://127.0.0.1:11434 --name open-webui --restart always ghcr.io/open-webui/open-webui:main
+# 使用powershell执行
+docker run -d -p 3001:3000 -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://host.docker.internal:11434 --name open-webui --restart always ghcr.io/open-webui/open-webui:main
+# 原命令仅需执行一次（创建容器），后续用 docker start open-webui 启动即可
 ```
-
 **说明**：这个命令是适配本项目的，它会：
 - 使用主机网络模式，确保Open WebUI能访问本地的FastAPI服务
 - 持久化存储Open WebUI的数据

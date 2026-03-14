@@ -225,4 +225,54 @@
 - 修改`create_vectorstore`函数的search_kwargs参数
 - 修改提示词
 
+## 问题12：容器启动后，显示服务不可用
 
+### 分析
+- 使用CMD执行会报错，因为CMD不支持docker run的--network=host参数
+- 不支持docker run的--network=host参数
+
+### 解决方法
+- 使用powershell
+- 修改命令
+
+### 主要改动
+- docker run -d --network=host -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://127.0.0.1:11434 --name open-webui --restart always ghcr.io/open-webui/open-webui:main
+  改为
+  docker run -d -p 3001:3000 -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://host.docker.internal:11434 --name open-webui --restart always ghcr.io/open-webui/open-webui:main
+
+## 问题13：容器启动后，显示服务不可用
+
+### 分析
+- ERR_CONNECTION_RESET（连接重置）说明你的主机能找到 WSL2 的端口，但网络连接被强制断开—— 根源是 Windows 和 WSL2 之间的网络隔离 / 端口转发问题，而非容器本身故障。
+
+### 解决方法
+- 先彻底清理旧容器 / 网络
+- 改用 Docker Desktop 的「端口映射 + 主机桥接」模式，重新启动容器：
+
+### 主要改动
+- docker run -d -p 3001:3000 -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://host.docker.internal:11434 --name open-webui --restart always ghcr.io/open-webui/open-webui:main
+  改为
+  docker run -d --name open-webui --restart always --network bridge -p 0.0.0.0:3001:3000 -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://host.docker.internal:11434 -e WEBUI_AUTH=False ghcr.io/open-webui/open-webui:main
+
+## 问题14：容器启动后，显示服务不可用
+
+### 分析
+- 系统代理配置 是导致访问失败的根本原因
+- Windows 会优先使用残留的代理配置转发 localhost/127.0.0.1 请求，导致访问 3001 端口时被代理拦截，返回「连接重置」。
+
+### 解决方法
+- 以管理员身份运行 PowerShell，执行命令清除代理
+- 重启 Open WebUI 容器
+
+### 主要改动
+- # 清除用户级代理
+  Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name ProxyServer -Value ""
+  Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name ProxyEnable -Value 0
+
+## 问题15：容器启动后，显示服务不可用
+
+### 分析
+- 日志显示服务确实启动了（"Started server process [1]"），但奇怪的是它卡在了"Waiting for application startup"之后就没有继续了
+
+### 解决方法
+本地使用Open WebUI或gradio自制UI
