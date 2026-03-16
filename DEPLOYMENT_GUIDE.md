@@ -63,7 +63,7 @@ Invoke-WebRequest -Uri "http://localhost:8001/init" -Method POST
 curl -X POST http://localhost:8001/init
 ```
 
-如需强制重建知识库（替换旧内容）：
+如需强制重建知识库（会删除旧知识库）：
 ```bash
 curl -X POST http://localhost:8001/init?force_rebuild=true
 ```

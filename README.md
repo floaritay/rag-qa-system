@@ -82,7 +82,8 @@ export BAILIAN_API_KEY=你的百炼平台API密钥
 cd backend
 python main.py
 ```
-后端服务将在 http://localhost:8001 运行。
+后端服务将在 http://localhost:8001 运行。  
+![后端服务](images\image1.png)
 
 7. **初始化知识库（首次使用或新增课程资料时）**
 ```bash
@@ -104,7 +105,8 @@ curl -X POST http://localhost:8001/init
 
      b. **使用 Open WebUI**  
      使用 Open WebUI 访问。参阅 [DEPLOYMENT\_GUIDE.md](./DEPLOYMENT_GUIDE.md)。  
-     
+     ![访问界面](images\image2.png)
+
      c. **使用原生前端界面**  
      使用原生前端界面访问1. 用浏览器打开 d:\CV1\web\index.html  
      或启动本地服务器：  
@@ -135,6 +137,9 @@ curl -X POST http://localhost:8001/ask -H "Content-Type: application/json" -d '{
 curl -X POST http://localhost:8001/ask -H "Content-Type: application/json" -d "{\"question\":\"什么是多AGV调度算法？\"}"
 # Windows cmd.exe 中，JSON 数据应该用 双引号 包裹，并且内部的双引号需要转义
 ```
+OpenWebUI 界面示例：  
+![根据知识库回答](images\image3.png)  
+根据知识库回答并给出来源  
 
 ### 初始化知识库
 
