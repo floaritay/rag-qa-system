@@ -1,7 +1,7 @@
-from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
+from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader # 加载PDF文件
+from langchain_text_splitters import RecursiveCharacterTextSplitter # 文本分割器
+from langchain_openai import OpenAIEmbeddings # OpenAI嵌入模型，用于将文本转换为向量表示，以便后续在向量空间中进行相似性搜索。
+from langchain_community.vectorstores import FAISS # 向量数据库
 import os
 
 # 1. 加载文档（批量处理整个文件夹）
@@ -9,9 +9,9 @@ def load_documents(directory_path):
     loader = DirectoryLoader(
         directory_path, 
         glob="**/*.pdf",  # 加载所有PDF
-        loader_cls=PyPDFLoader
+        loader_cls=PyPDFLoader # 使用PyPDFLoader加载PDF文件
     )
-    documents = loader.load()
+    documents = loader.load() # 加载所有PDF文件
     print(f"加载了 {len(documents)} 个PDF文件")
     return documents
 
@@ -31,10 +31,10 @@ def create_vectorstore(texts):
     # 使用OpenAI的嵌入模型
     embeddings = OpenAIEmbeddings()
     
-    # 创建FAISS向量数据库（本地存储，无需服务器）
+    # 创建一个 FAISS 向量数据库（本地存储，无需服务器） ，它将文本块 texts 转换为向量，并使用 embeddings 模型进行嵌入计算。
     vectorstore = FAISS.from_documents(texts, embeddings)
     
-    # 保存到本地
+    # 将向量数据库保存到本地的 course_knowledge_base 文件夹中。
     vectorstore.save_local("course_knowledge_base")
     print("知识库已保存到 course_knowledge_base 文件夹")
     return vectorstore

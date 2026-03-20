@@ -21,7 +21,7 @@
 #### 安装依赖
 ```bash
 # 进入项目目录
-cd d:\CV1
+cd d:\你的文件目录
 
 # 安装后端依赖
 pip install -r backend\requirements.txt
@@ -40,13 +40,13 @@ export BAILIAN_API_KEY=你的百炼平台API密钥
 ```
 
 ### 3. 准备课程资料
-将PDF格式的课程资料放入 `d:\CV1\course_materials` 文件夹（如果不存在请创建）。  
+将PDF格式的课程资料放入 `d:\你的文件目录\course_materials` 文件夹（如果不存在请创建）。  
 支持的文件类型：PDF。
 
 ### 4. 启动后端服务
 ```bash
 # 进入项目目录
-cd d:\CV1
+cd d:\你的文件目录
 
 # 启动FastAPI服务
 python backend\main.py
@@ -74,7 +74,7 @@ curl -X POST http://localhost:8001/init?force_rebuild=true
 #### 方式一：使用 Gradio（快速验证）
 ```bash
 # 进入frontend目录
-cd d:\CV1\frontend
+cd d:\你的文件目录\frontend
 
 # 启动Gradio服务
 python app.py
@@ -129,7 +129,7 @@ open-webui serve
 
 #### 检查向量库文件
 
-打开 `D:\CV1\course_knowledge_base` 文件夹（启动服务并初始化后自动生成），能看到以下文件说明向量库创建成功：
+打开 `D:\你的文件目录\course_knowledge_base` 文件夹（启动服务并初始化后自动生成），能看到以下文件说明向量库创建成功：
 - `index.faiss`  
 - `index.pkl`
 
@@ -213,8 +213,6 @@ open-webui serve
 
 ## 项目结构
 ```
-d:\CV1\
-├CV1/
 ├── backend/                    # 后端服务
 │   ├── main.py                # FastAPI 主服务
 │   ├── knowledge_base.py      # 知识库构建模块

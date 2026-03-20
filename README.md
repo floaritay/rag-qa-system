@@ -19,7 +19,6 @@
 
 ## 项目结构
 ```
-CV1/
 ├── backend/                    # 后端服务
 │   ├── main.py                # FastAPI 主服务
 │   ├── knowledge_base.py      # 知识库构建模块
@@ -49,7 +48,7 @@ CV1/
 1. **克隆项目**
 ```bash
 git clone <repository-url>
-cd CV1
+cd 你的文件目录
 ```
 
 2. **安装后端依赖**
@@ -83,7 +82,7 @@ cd backend
 python main.py
 ```
 后端服务将在 http://localhost:8001 运行。  
-![后端服务](images\image1.png)
+![后端服务](./images/image1.png)
 
 7. **初始化知识库（首次使用或新增课程资料时）**
 ```bash
@@ -108,10 +107,10 @@ curl -X POST http://localhost:8001/init
      ![访问界面](images\image2.png)
 
      c. **使用原生前端界面**  
-     使用原生前端界面访问1. 用浏览器打开 d:\CV1\web\index.html  
+     使用原生前端界面访问1. 用浏览器打开 d:\你的文件目录\web\index.html  
      或启动本地服务器：  
      ```bash
-     cd d:\CV1\web
+     cd 你的文件目录\web
      python -m http.server 8080
      ```
      然后访问 http://localhost:8080  
