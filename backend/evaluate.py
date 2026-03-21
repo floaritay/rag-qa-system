@@ -52,10 +52,9 @@ class RAGEvaluator:
             relevant_count = 0
             for doc in docs:
                 content = doc.page_content.lower()
-                for keyword in relevant_keywords:
-                    if keyword.lower() in content:
-                        relevant_count += 1
-                        break
+                is_relevant = any(keyword.lower() in content for keyword in relevant_keywords) # 每个文档只要匹配至少一个关键词即视为相关
+                if is_relevant:
+                    relevant_count += 1
             
             precision = relevant_count / len(docs)
             return precision
