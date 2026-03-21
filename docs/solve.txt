@@ -300,3 +300,21 @@
 - 添加`POST /v1/chat/completions`端点，处理OpenAI格式的聊天请求
 - 该端点会从messages中提取用户问题，调用RAG链，返回OpenAI格式的响应
 - Open WebUI配置时API地址需要设为`http://localhost:8001/v1`（注意加/v1）
+
+## 问题17：评估脚本中 VectorStoreRetriever 方法不存在
+
+### 遇到的问题
+- 错误信息：`'VectorStoreRetriever' object has no attribute 'get_relevant_documents'`
+- 运行评估脚本时，调用retriever的方法失败
+
+### 分析
+- LangChain新版本中，`VectorStoreRetriever`的API发生了变化
+- 旧方法`get_relevant_documents()`已被弃用，改为`invoke()`方法
+
+### 解决方法
+- 将`retriever.get_relevant_documents(query)`改为`retriever.invoke(query)`
+- LangChain的新API使用LCEL（LangChain Expression Language）风格，统一使用`invoke()`方法
+
+### 主要改动
+- 在evaluate.py的evaluate_recall_at_k()函数中，修改检索方法调用
+- 保持其他逻辑不变，只更新方法调用方式
