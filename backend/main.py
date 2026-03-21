@@ -107,6 +107,7 @@ bailian_base_url = os.getenv("BAILIAN_BASE_URL", "https://dashscope.aliyuncs.com
 bailian_api_key = os.getenv("BAILIAN_API_KEY")
 bailian_model = "qwen-plus-2025-07-28"
 bailian_embedding_model = "text-embedding-v2"
+# bailian_embedding_model = "text-embedding-v4"
 
 # 自定义Embeddings类，使用直接API调用阿里云百炼
 class BailianEmbeddings(Embeddings): 

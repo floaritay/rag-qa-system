@@ -1,12 +1,12 @@
 
 """
 RAG系统评估脚本
-用于计算Top-N召回率等指标
+用于计算Top-N召回率、精确率等指标
 """
 import sys
 import os
 import json
-from typing import List, Dict
+from typing import List, Dict, Set
 import time
 
 # 添加项目根目录到Python路径
@@ -29,17 +29,19 @@ class RAGEvaluator:
         self.retriever = main_retriever
         print("评估器初始化完成")
     
-    def evaluate_recall_at_k(self, query: str, relevant_keywords: List[str], k: int = 3) -> float:
+    def evaluate_precision_at_k(self, query: str, relevant_keywords: List[str], k: int = 3) -> float:
         """
-        计算Top-K召回率（基于关键词匹配）
+        计算Top-K精确率（Precision@K）
+        
+        精确率 = 检索到的相关文档数 / 检索到的文档总数
         
         参数:
             query: 查询问题
-            relevant_keywords: 相关关键词列表（用于判断检索结果是否相关）
+            relevant_keywords: 相关关键词列表
             k: 检索的Top-K数量
             
         返回:
-            recall: 召回率 (0-1之间)
+            precision: 精确率 (0-1之间)
         """
         try:
             docs = self.retriever.invoke(query)[:k]
@@ -55,7 +57,41 @@ class RAGEvaluator:
                         relevant_count += 1
                         break
             
-            recall = relevant_count / len(docs)
+            precision = relevant_count / len(docs)
+            return precision
+            
+        except Exception as e:
+            print(f"计算精确率时出错: {e}")
+            return 0.0
+    
+    def evaluate_recall_at_k(self, query: str, relevant_keywords: List[str], k: int = 3) -> float:
+        """
+        计算Top-K召回率（Recall@K）
+        
+        召回率 = 在检索结果中找到的不同关键词数 / 总关键词数
+        
+        参数:
+            query: 查询问题
+            relevant_keywords: 相关关键词列表（用于判断检索结果是否相关）
+            k: 检索的Top-K数量
+            
+        返回:
+            recall: 召回率 (0-1之间)
+        """
+        try:
+            docs = self.retriever.invoke(query)[:k]
+            
+            if not docs or not relevant_keywords:
+                return 0.0
+            
+            found_keywords: Set[str] = set()
+            all_content = ' '.join([doc.page_content.lower() for doc in docs])
+            
+            for keyword in relevant_keywords:
+                if keyword.lower() in all_content:
+                    found_keywords.add(keyword.lower())
+            
+            recall = len(found_keywords) / len(relevant_keywords)
             return recall
             
         except Exception as e:
@@ -73,6 +109,9 @@ class RAGEvaluator:
             results: 包含各项指标的统计结果
         """
         results = {
+            'precision@1': [],
+            'precision@3': [],
+            'precision@5': [],
             'recall@1': [],
             'recall@3': [],
             'recall@5': [],
@@ -87,13 +126,16 @@ class RAGEvaluator:
             start_time = time.time()
             
             for k in [1, 3, 5]:
+                precision = self.evaluate_precision_at_k(query, relevant_keywords, k)
                 recall = self.evaluate_recall_at_k(query, relevant_keywords, k)
+                results[f'precision@{k}'].append(precision)
                 results[f'recall@{k}'].append(recall)
             
             end_time = time.time()
             results['avg_response_time'].append(end_time - start_time)
             
             print(f"  查询: {query[:50]}...")
+            print(f"  Precision@3: {results['precision@3'][-1]:.2f}")
             print(f"  Recall@3: {results['recall@3'][-1]:.2f}")
         
         # 计算平均值
@@ -108,21 +150,21 @@ class RAGEvaluator:
         """
         生成评估报告
         """
-        print("\n" + "="*50)
+        print("\n" + "="*60)
         print("RAG系统评估报告")
-        print("="*50)
+        print("="*60)
         
         results = self.evaluate_batch(test_cases)
         
         print("\n平均指标:")
-        print("-"*30)
+        print("-"*60)
         for metric, value in results.items():
             if metric == 'avg_response_time':
-                print(f"{metric}: {value:.4f} 秒")
+                print(f"{metric:<25}: {value:.4f} 秒")
             else:
-                print(f"{metric}: {value:.4f} ({value*100:.2f}%)")
+                print(f"{metric:<25}: {value:.4f} ({value*100:.2f}%)")
         
-        print("\n" + "="*50)
+        print("\n" + "="*60)
         return json.dumps(results, indent=2, ensure_ascii=False)
 
 # 示例测试用例
