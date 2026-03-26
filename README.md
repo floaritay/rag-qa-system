@@ -104,7 +104,7 @@ curl -X POST http://localhost:8001/init
 
      b. **使用 Open WebUI**  
      使用 Open WebUI 访问。参阅 [DEPLOYMENT\_GUIDE.md](./DEPLOYMENT_GUIDE.md)。  
-     ![访问界面](images\image2.png)
+     ![访问界面](./images/image2.png)
 
      c. **使用原生前端界面**  
      使用原生前端界面访问1. 用浏览器打开 d:\你的文件目录\web\index.html  
@@ -137,7 +137,7 @@ curl -X POST http://localhost:8001/ask -H "Content-Type: application/json" -d "{
 # Windows cmd.exe 中，JSON 数据应该用 双引号 包裹，并且内部的双引号需要转义
 ```
 OpenWebUI 界面示例：  
-![根据知识库回答](images\image3.png)  
+![根据知识库回答](./images/image3.png)  
 根据知识库回答并给出来源  
 
 ### 初始化知识库
@@ -181,6 +181,11 @@ curl -X POST http://localhost:8001/init?force_rebuild=true
 详细的部署和使用说明请参阅 [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)。
 
 ## 常见问题
+
+需要重建知识库的情况 ：
+- 新增/删除/修改了 PDF 文件
+- 更换了嵌入模型
+- 修改了文本分割参数（chunk_size, chunk_overlap）
 
 如有问题，请查看 [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) 中的常见问题部分，或查看 [solve.txt](./solve.txt) 中的问题解决记录。
 

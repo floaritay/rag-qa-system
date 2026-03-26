@@ -167,4 +167,38 @@ recall@3                 : 0.6333 (63.33%)
 recall@5                 : 0.6333 (63.33%)
 avg_response_time        : 4.2801 秒
 ============================================================
+
+增加检索数量(如果召回率足够，可以减少 k 值,降低响应时间)
+retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+
+添加相似度阈值
+# 使用相似度分数阈值，放宽匹配条件
+retriever = vectorstore.as_retriever(
+    search_type="similarity_score_threshold",
+    search_kwargs={
+        "k": 5,
+        "score_threshold": 0.3  # 相似度阈值，越低越宽松
+    }
+)
+优化测试用例关键词
+{
+    "query": "什么是矩阵制造车间？",
+    "relevant_keywords": ["矩阵", "制造车间", "生产", "布局", "调度", "优化"]  # 添加更多相关词
+}
+
+使用本地缓存
+from functools import lru_cache
+@lru_cache(maxsize=100)
+def cached_retrieve(query: str):
+    return retriever.invoke(query)
+
+优化LLM参数
+llm = ChatOpenAI(
+    openai_api_key=bailian_api_key,
+    openai_api_base=bailian_base_url,
+    model_name=bailian_model,
+    temperature=0.3,
+    max_tokens=500,  # 限制输出长度
+    request_timeout=10  # 设置超时
+)    
  -->
