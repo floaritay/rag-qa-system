@@ -202,3 +202,49 @@ llm = ChatOpenAI(
     request_timeout=10  # 设置超时
 )    
  -->
+
+
+
+<!-- 
+文本嵌入模型（Embedding Model）
+支持的模型：
+
+MTEB、CMTEB 是 Embedding 模型的通用评估指标，数值越大，模型效果越好。text-embedding-v3 与 text-embedding-v4模型当前无法通过 LangChain 框架接口指定向量维度，默认采用 1024 维度作为输出向量维度值。
+
+| 模型 | MTEB（Retrieval task） | CMTEB | CMTEB (Retrieval task) |
+| --- | --- | --- | --- |
+| text-embedding-v1 | 58.30 | 45.47 | 56.59 |
+| text-embedding-v2 | 60.13 | 49.49 | 62.78 |
+| text-embedding-v3（1024维度） | 63.39 | 55.41 | 73.23 |
+| text-embedding-v4（1024维度） | 68.36 | 59.30 | 73.98 |
+
+
+使用前需要安装以下依赖：
+pip install langchain-community
+pip install dashscope
+
+模型调用：
+from langchain_community.embeddings import DashScopeEmbeddings
+embeddings = DashScopeEmbeddings(
+    model="text-embedding-v4",
+    # other params...
+)
+
+text = "This is a test document."
+
+query_result = embeddings.embed_query(text)
+print("文本向量长度：", len(query_result), sep='')
+
+doc_results = embeddings.embed_documents(
+    [
+        "Hi there!",
+        "Oh, hello!",
+        "What's your name?",
+        "My friends call me World",
+        "Hello World!"
+    ])
+print("文本向量数量：", len(doc_results), "，文本向量长度：", len(doc_results[0]), sep='')
+
+详细介绍与更多使用方式请前往 LangChain 官方的 DashScope Embeddings。
+完整的 API参考文档请前往 LangChain 官方的 Embedding API Reference。 
+ -->
