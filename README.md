@@ -103,7 +103,7 @@ curl -X POST http://localhost:8001/init
    前端界面将在 http://localhost:7860 运行。
 
      b. **使用 Open WebUI**  
-     使用 Open WebUI 访问。参阅 [DEPLOYMENT\_GUIDE.md](./DEPLOYMENT_GUIDE.md)。  
+     使用 Open WebUI 访问。参阅 [DEPLOYMENT_GUIDE.md](./docs/DEPLOYMENT_GUIDE.md)。  
      ![访问界面](./images/image2.png)
 
      c. **使用原生前端界面**  
@@ -178,7 +178,7 @@ curl -X POST http://localhost:8001/init?force_rebuild=true
 
 ## 详细文档
 
-详细的部署和使用说明请参阅 [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)。
+详细的部署和使用说明请参阅 [DEPLOYMENT_GUIDE.md](./docs/DEPLOYMENT_GUIDE.md)。
 
 ## 常见问题
 
@@ -187,7 +187,7 @@ curl -X POST http://localhost:8001/init?force_rebuild=true
 - 更换了嵌入模型
 - 修改了文本分割参数（chunk_size, chunk_overlap）
 
-如有问题，请查看 [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) 中的常见问题部分，或查看 [solve.txt](./solve.txt) 中的问题解决记录。
+如有问题，请查看 [DEPLOYMENT_GUIDE.md](./docs/DEPLOYMENT_GUIDE.md) 中的常见问题部分，或查看 [solve.txt](./docs/solve.txt) 中的问题解决记录。
 
 ## 注意事项
 
