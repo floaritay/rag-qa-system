@@ -364,3 +364,30 @@
 - 使用 `is_relevant = any(keyword.lower() in content for keyword in relevant_keywords)`
 - 当 `is_relevant` 为 True 时，才增加 `relevant_count`
 - 保持功能完全相同，但代码更清晰易读
+
+## 问题20：硅基流动版本请求超时
+
+### 遇到的问题
+- 使用硅基流动BAAI/bge-m3嵌入模型的新版本（main_siliconflow.py），提问时前端显示"请求超时，请稍后重试"
+- 后端服务正常启动，/health和/接口均返回200，但/ask请求无响应
+
+### 分析
+- `rag_chain.invoke()` 是同步调用，但在FastAPI的 `async def` 端点中直接执行
+- 同步调用会阻塞FastAPI的异步事件循环（event loop），导致请求无法正常处理
+- 此外，LLM（ChatOpenAI）和Embedding API调用均未设置超时参数，一旦API响应慢就会无限等待
+- 前端fetch请求也没有AbortController超时控制
+
+### 解决方法
+1. 使用 `asyncio.to_thread()` 将同步的 `rag_chain.invoke()` 放到线程池执行，避免阻塞事件循环
+2. 为ChatOpenAI添加 `request_timeout=120` 和 `max_retries=2` 参数
+3. 使用 `asyncio.wait_for()` 为整个LLM调用添加120秒超时保护
+4. 将Embedding API的timeout从60秒提高到120秒
+5. 添加诊断日志，方便定位问题（API密钥状态、检索文档数量、LLM调用状态）
+
+### 主要改动
+- 导入 `asyncio` 模块
+- `/ask` 端点：将 `rag_chain.invoke()` 改为 `await asyncio.wait_for(asyncio.to_thread(rag_chain.invoke, ...), timeout=120)`
+- `/v1/chat/completions` 端点：同样改为异步线程调用并添加超时保护
+- ChatOpenAI初始化添加 `request_timeout=120, max_retries=2`
+- SiliconFlowEmbeddings的timeout从60改为120
+- 添加启动配置信息打印和请求处理日志

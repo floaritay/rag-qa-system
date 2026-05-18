@@ -5,6 +5,7 @@ from typing import List, Optional
 from datetime import datetime
 import uuid
 import time
+import asyncio
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -129,7 +130,7 @@ class SiliconFlowEmbeddings(Embeddings):
         }
 
         try:
-            response = requests.post(url, headers=headers, json=data, timeout=60)
+            response = requests.post(url, headers=headers, json=data, timeout=120)
             response.raise_for_status()
             result = response.json()
             embeddings = [item['embedding'] for item in result['data']]
@@ -277,7 +278,9 @@ def init_vectorstore(force_rebuild=False):
             openai_api_key=bailian_api_key,
             openai_api_base=bailian_base_url,
             model_name=bailian_model,
-            temperature=0.3
+            temperature=0.3,
+            request_timeout=120,
+            max_retries=2
         )
 
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -328,10 +331,26 @@ async def ask_question(query: Query):
             raise HTTPException(status_code=503, detail="未设置SILICONFLOW_API_KEY环境变量")
 
         if not rag_chain:
+            print("rag_chain未初始化，尝试初始化...")
             if not init_vectorstore():
                 raise HTTPException(status_code=503, detail="向量库未初始化，请先上传课程资料")
 
-        answer = rag_chain.invoke(query.question)
+        print(f"收到问题: {query.question}")
+        print("开始检索相关文档...")
+        docs = retriever.invoke(query.question)
+        print(f"检索到 {len(docs)} 个文档")
+
+        print("开始调用LLM...")
+        try:
+            answer = await asyncio.wait_for(
+                asyncio.to_thread(rag_chain.invoke, query.question),
+                timeout=120
+            )
+        except asyncio.TimeoutError:
+            print("LLM调用超时(120秒)")
+            raise HTTPException(status_code=504, detail="LLM调用超时，请检查模型配置或网络连接")
+        print(f"LLM返回结果，长度: {len(answer)}")
+
         sources = []
         return Response(answer=answer, sources=sources)
     except HTTPException:
@@ -389,7 +408,15 @@ async def chat_completions(request: OpenAIChatRequest):
         if not user_message:
             raise HTTPException(status_code=400, detail="No user message found")
 
-        answer = rag_chain.invoke(user_message)
+        print(f"[chat] 收到问题: {user_message}")
+        try:
+            answer = await asyncio.wait_for(
+                asyncio.to_thread(rag_chain.invoke, user_message),
+                timeout=120
+            )
+        except asyncio.TimeoutError:
+            print("[chat] LLM调用超时(120秒)")
+            raise HTTPException(status_code=504, detail="LLM调用超时，请检查模型配置或网络连接")
 
         return OpenAIChatResponse(
             model=request.model,
@@ -405,4 +432,13 @@ async def chat_completions(request: OpenAIChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    print("=" * 50)
+    print("启动课程助手API...")
+    print(f"SILICONFLOW_API_KEY: {'已设置' if siliconflow_api_key else '未设置'}")
+    print(f"BAILIAN_API_KEY: {'已设置' if bailian_api_key else '未设置'}")
+    print(f"BAILIAN_BASE_URL: {bailian_base_url}")
+    print(f"BAILIAN_MODEL: {bailian_model}")
+    print(f"SILICONFLOW_BASE_URL: {siliconflow_base_url}")
+    print(f"SILICONFLOW_MODEL: {siliconflow_embedding_model}")
+    print("=" * 50)
+    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")
