@@ -79,6 +79,32 @@
                     </div>
 
                     <div class="sidebar-card">
+                        <h3>🔧 检索策略</h3>
+                        <div class="strategy-group">
+                            <label for="retrievalStrategy">检索方式</label>
+                            <select id="retrievalStrategy">
+                                <option value="default">默认（向量检索）</option>
+                                <option value="hybrid">混合检索（向量+BM25）</option>
+                            </select>
+                        </div>
+                        <div class="strategy-group">
+                            <label for="preRetrieval">预检索优化</label>
+                            <select id="preRetrieval">
+                                <option value="none">无</option>
+                                <option value="rewrite">查询改写</option>
+                                <option value="hyde">HyDE</option>
+                            </select>
+                        </div>
+                        <div class="strategy-group">
+                            <label for="postRetrieval">后检索优化</label>
+                            <select id="postRetrieval">
+                                <option value="none">无</option>
+                                <option value="rerank">重排序</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="sidebar-card">
                         <h3>📖 使用说明</h3>
                         <ul>
                             <li>点击左侧"＋"新建会话</li>

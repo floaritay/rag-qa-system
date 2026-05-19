@@ -24,7 +24,10 @@ const elements = {
     sessionList: document.getElementById('sessionList'),
     sessionBanner: document.getElementById('sessionBanner'),
     sessionBannerTitle: document.getElementById('sessionBannerTitle'),
-    closeSessionBtn: document.getElementById('closeSessionBtn')
+    closeSessionBtn: document.getElementById('closeSessionBtn'),
+    retrievalStrategy: document.getElementById('retrievalStrategy'),
+    preRetrieval: document.getElementById('preRetrieval'),
+    postRetrieval: document.getElementById('postRetrieval')
 };
 
 // ============================================================
@@ -324,6 +327,9 @@ async function askQuestion(question) {
         if (currentSessionId) {
             body.session_id = currentSessionId;
         }
+        body.retrieval_strategy = elements.retrievalStrategy.value;
+        body.pre_retrieval = elements.preRetrieval.value;
+        body.post_retrieval = elements.postRetrieval.value;
 
         const response = await fetch(`${API_URL}/ask`, {
             method: 'POST',
