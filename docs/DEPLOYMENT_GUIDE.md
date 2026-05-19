@@ -81,7 +81,13 @@ python app.py
 ```
 访问 http://localhost:7860 即可使用
 
-#### 方式二：启动Docker容器部署Open WebUI
+#### 方式二：使用 Web 界面（快速验证）
+```bash
+python -m http.server 8080 --directory web
+```
+然后浏览器访问 http://localhost:8080。
+
+#### 方式三：启动Docker容器部署Open WebUI
 启动docker desktop后，执行以下命令
 ```bash
 # 使用powershell执行
@@ -97,7 +103,7 @@ docker run -d -p 3001:3000 -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=ht
 打开浏览器，访问 http://localhost:3001 即可使用Open WebUI
 
 
-#### 方式三：本地下载OpenWebUI
+#### 方式四：本地下载OpenWebUI
 ```bash
 # 安装open-webui
 pip install open-webui

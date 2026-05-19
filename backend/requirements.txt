@@ -9,3 +9,6 @@ pypdf
 fastapi
 uvicorn
 pydantic
+python-dotenv
+requests
+rank_bm25

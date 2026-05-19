@@ -53,6 +53,212 @@
     box-sizing: border-box;
 }
 
+.app-layout {
+    display: flex;
+    gap: 0;
+    max-width: 1400px;
+    margin: 24px auto;
+    padding: 0;
+    position: relative;
+    z-index: 1;
+    animation: containerFadeIn 0.6s ease-out;
+}
+
+/* ============================================================
+   会话侧边栏
+   ============================================================ */
+
+.session-sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: var(--radius-xxl) 0 0 var(--radius-xxl);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-right: 1px solid var(--border-tertiary);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow:
+        0px 25px 80px rgba(0, 0, 0, 0.15),
+        0px 0px 1px rgba(0, 0, 0, 0.15);
+}
+
+.session-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 20px 16px;
+    border-bottom: 1px solid var(--border-tertiary);
+}
+
+.session-sidebar-header h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.new-session-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    background: var(--gradient-primary);
+    border: none;
+    color: #fff;
+    font-size: 20px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0px 2px 8px rgba(0, 87, 255, 0.3);
+}
+
+.new-session-btn:hover {
+    transform: translateY(-2px) scale(1.05);
+    box-shadow: 0px 4px 16px rgba(0, 87, 255, 0.4);
+}
+
+.session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+.session-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.session-list::-webkit-scrollbar-thumb {
+    background: var(--border-secondary);
+    border-radius: 2px;
+}
+
+.session-item {
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition);
+    margin-bottom: 4px;
+    border: 1px solid transparent;
+    position: relative;
+}
+
+.session-item:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-tertiary);
+}
+
+.session-item.active {
+    background: var(--primary-transparent-2);
+    border-color: var(--primary);
+}
+
+.session-item-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 24px;
+}
+
+.session-item-meta {
+    font-size: 11px;
+    color: var(--text-quaternary);
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.session-item-delete {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--text-quaternary);
+    font-size: 12px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+
+.session-item:hover .session-item-delete {
+    display: flex;
+}
+
+.session-item-delete:hover {
+    background: rgba(249, 77, 77, 0.1);
+    color: var(--accent-red);
+}
+
+.session-list-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-quaternary);
+    font-size: 13px;
+}
+
+.session-list-empty .empty-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+    opacity: 0.5;
+}
+
+/* ============================================================
+   会话横幅（聊天区顶部）
+   ============================================================ */
+
+.session-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: var(--primary-transparent-1);
+    border: 1px solid var(--primary-transparent-2);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    margin-bottom: -16px;
+}
+
+.session-banner-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.session-banner-close {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.session-banner-close:hover {
+    background: rgba(249, 77, 77, 0.1);
+    color: var(--accent-red);
+}
+
 body {
     font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif;
     font-size: 16px;
@@ -81,21 +287,20 @@ body::before {
 }
 
 .main-container {
-    max-width: 1200px;
-    margin: 24px auto;
+    flex: 1;
     padding: 32px;
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border-radius: var(--radius-xxl);
-    box-shadow: 
+    border-radius: 0 var(--radius-xxl) var(--radius-xxl) 0;
+    box-shadow:
         0px 25px 80px rgba(0, 0, 0, 0.15),
         0px 0px 1px rgba(0, 0, 0, 0.15),
         inset 0px 1px 0px rgba(255, 255, 255, 0.8);
     border: 1px solid rgba(255, 255, 255, 0.5);
+    border-left: none;
     position: relative;
-    z-index: 1;
-    animation: containerFadeIn 0.6s ease-out;
+    overflow: hidden;
 }
 
 @keyframes containerFadeIn {
@@ -717,35 +922,49 @@ body::before {
     body {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     }
-    
-    .main-container {
+
+    .app-layout {
+        flex-direction: column;
         margin: 12px;
-        padding: 20px;
-        border-radius: var(--radius-xl);
     }
-    
+
+    .session-sidebar {
+        width: 100%;
+        min-width: unset;
+        max-height: 200px;
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+        border-right: 1px solid rgba(255, 255, 255, 0.5);
+        border-bottom: 1px solid var(--border-tertiary);
+    }
+
+    .main-container {
+        padding: 20px;
+        border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+        border-left: 1px solid rgba(255, 255, 255, 0.5);
+    }
+
     .content-area {
         flex-direction: column;
     }
-    
+
     .sidebar {
         order: -1;
     }
-    
+
     .chatbot-container {
         height: 420px;
     }
-    
+
     .message-content {
         max-width: 85%;
     }
-    
+
     .message-avatar {
         width: 32px;
         height: 32px;
         font-size: 16px;
     }
-    
+
     .title-area h1 {
         font-size: 24px;
     }
