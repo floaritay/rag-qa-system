@@ -33,6 +33,14 @@ const dom = {
     strategyConflict: $('strategyConflict'),
     strategyConflictMsg: $('strategyConflictMsg'),
     toastContainer: $('toastContainer'),
+    cfgLlmModel: $('cfgLlmModel'),
+    cfgLlmBaseUrl: $('cfgLlmBaseUrl'),
+    cfgLlmApiKey: $('cfgLlmApiKey'),
+    cfgEmbModel: $('cfgEmbModel'),
+    cfgEmbBaseUrl: $('cfgEmbBaseUrl'),
+    cfgEmbApiKey: $('cfgEmbApiKey'),
+    cfgRerankerModel: $('cfgRerankerModel'),
+    saveConfigBtn: $('saveConfigBtn'),
 };
 
 // ============================================================
@@ -605,6 +613,7 @@ function handleKeyDown(e) {
 // ============================================================
 function openSettings() {
     dom.settingsOverlay.classList.add('open');
+    loadConfig();
 }
 
 function closeSettings() {
@@ -661,6 +670,21 @@ function initCustomSelects() {
     });
 }
 
+function initSettingsTabs() {
+    document.querySelectorAll('.settings-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const target = tab.dataset.tab;
+            // Update tab buttons
+            document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            // Update panels
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            const panel = target === 'model' ? document.getElementById('tabModel') : document.getElementById('tabStrategy');
+            if (panel) panel.classList.add('active');
+        });
+    });
+}
+
 function updateStrategyConstraints() {
     const pre = getSelectValue('preRetrievalSelect');
     const retrieval = getSelectValue('retrievalStrategySelect');
@@ -673,6 +697,81 @@ function updateStrategyConstraints() {
         conflict.classList.remove('visible');
     }
 }
+
+// ============================================================
+// Config Load / Save
+// ============================================================
+async function loadConfig() {
+    try {
+        const res = await fetch(`${API_URL}/config`);
+        if (!res.ok) return;
+        const cfg = await res.json();
+
+        dom.cfgLlmModel.value = cfg.llm?.model || '';
+        dom.cfgLlmBaseUrl.value = cfg.llm?.base_url || '';
+        dom.cfgLlmApiKey.value = '';
+        dom.cfgLlmApiKey.placeholder = cfg.llm?.api_key || '未设置';
+
+        dom.cfgEmbModel.value = cfg.embedding?.model || '';
+        dom.cfgEmbBaseUrl.value = cfg.embedding?.base_url || '';
+        dom.cfgEmbApiKey.value = '';
+        dom.cfgEmbApiKey.placeholder = cfg.embedding?.api_key || '未设置';
+
+        dom.cfgRerankerModel.value = cfg.reranker?.model || '';
+    } catch {
+        // silent
+    }
+}
+
+async function saveConfig() {
+    dom.saveConfigBtn.disabled = true;
+    dom.saveConfigBtn.textContent = '保存中...';
+
+    const body = {
+        llm: {
+            model: dom.cfgLlmModel.value.trim(),
+            base_url: dom.cfgLlmBaseUrl.value.trim(),
+            api_key: dom.cfgLlmApiKey.value.trim(),
+        },
+        embedding: {
+            model: dom.cfgEmbModel.value.trim(),
+            base_url: dom.cfgEmbBaseUrl.value.trim(),
+            api_key: dom.cfgEmbApiKey.value.trim(),
+        },
+        reranker: {
+            model: dom.cfgRerankerModel.value.trim(),
+        },
+    };
+
+    try {
+        const res = await fetch(`${API_URL}/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const result = await res.json();
+        if (res.ok) {
+            showToast(result.message || '配置已保存', 'success');
+            // Reload to show masked keys
+            await loadConfig();
+        } else {
+            showToast(`保存失败：${result.detail || '未知错误'}`, 'error');
+        }
+    } catch {
+        showToast('无法连接到后端服务', 'error');
+    }
+
+    dom.saveConfigBtn.disabled = false;
+    dom.saveConfigBtn.textContent = '保存配置';
+}
+
+// Toggle API key visibility
+document.querySelectorAll('.toggle-key-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const input = btn.parentElement.querySelector('input');
+        input.type = input.type === 'password' ? 'text' : 'password';
+    });
+});
 
 // ============================================================
 // Event Binding
@@ -695,6 +794,7 @@ dom.settingsOverlay.addEventListener('click', (e) => {
 });
 
 dom.rebuildBtn.addEventListener('click', rebuildKnowledgeBase);
+dom.saveConfigBtn.addEventListener('click', saveConfig);
 
 // Escape to close settings
 document.addEventListener('keydown', (e) => {
@@ -711,5 +811,6 @@ document.addEventListener('DOMContentLoaded', () => {
     bindChipClicks();
     updateMenuArrow();
     initCustomSelects();
+    initSettingsTabs();
     setInterval(checkHealth, 30000);
 });

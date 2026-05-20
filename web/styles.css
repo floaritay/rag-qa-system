@@ -1090,8 +1090,53 @@ body {
     font-weight: 600;
 }
 
+/* Settings tabs */
+.settings-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0 24px;
+    gap: 4px;
+}
+
+.settings-tab {
+    padding: 10px 16px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color var(--t-fast), border-color var(--t-fast);
+    white-space: nowrap;
+}
+
+.settings-tab:hover {
+    color: var(--text-primary);
+}
+
+.settings-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+/* Settings body / tab panels */
 .settings-body {
     padding: 20px 24px 24px;
+}
+
+.tab-panel {
+    display: none;
+}
+
+.tab-panel.active {
+    display: block;
+}
+
+#tabModel {
+    max-height: 55vh;
+    overflow-y: auto;
 }
 
 .setting-group {
@@ -1108,6 +1153,97 @@ body {
     font-weight: 500;
     color: var(--text-primary);
     margin-bottom: 6px;
+}
+
+/* Settings section title */
+.settings-section-title {
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-tertiary);
+    margin-top: 20px;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-section-title:first-child {
+    margin-top: 0;
+}
+
+/* Setting input */
+.setting-input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-lg);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 14px;
+    transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+
+.setting-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.setting-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.input-with-toggle {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.input-with-toggle .setting-input {
+    padding-right: 40px;
+}
+
+.toggle-key-btn {
+    position: absolute;
+    right: 6px;
+    width: 28px;
+    height: 28px;
+}
+
+/* Save config button */
+.save-config-btn {
+    width: 100%;
+    padding: 10px 16px;
+    margin-top: 16px;
+    margin-bottom: 8px;
+    background: var(--accent);
+    color: var(--text-inverse);
+    border: none;
+    border-radius: var(--r-lg);
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+}
+
+.save-config-btn:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px var(--accent-glow);
+}
+
+.save-config-btn:active {
+    transform: translateY(0);
+}
+
+.save-config-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
 }
 
 /* Custom Select Dropdown */

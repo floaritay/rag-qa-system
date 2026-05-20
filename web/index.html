@@ -115,11 +115,11 @@
             </div>
         </main>
 
-        <!-- 检索策略设置面板 -->
+        <!-- 设置面板 -->
         <div class="settings-overlay" id="settingsOverlay">
             <div class="settings-panel" id="settingsPanel">
                 <div class="settings-header">
-                    <h3>检索策略设置</h3>
+                    <h3>设置</h3>
                     <button class="btn-icon" id="settingsClose">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <line x1="18" y1="6" x2="6" y2="18"/>
@@ -127,7 +127,60 @@
                         </svg>
                     </button>
                 </div>
-                <div class="settings-body">
+                <!-- Tab 标签 -->
+                <div class="settings-tabs">
+                    <button class="settings-tab active" data-tab="model">模型设置</button>
+                    <button class="settings-tab" data-tab="strategy">检索策略</button>
+                </div>
+
+                <!-- 模型设置 Tab -->
+                <div class="settings-body tab-panel active" id="tabModel">
+                    <div class="settings-section-title">LLM 模型</div>
+                    <div class="setting-group">
+                        <label for="cfgLlmModel">模型名称</label>
+                        <input type="text" class="setting-input" id="cfgLlmModel" placeholder="qwen3.5-122b-a10b">
+                    </div>
+                    <div class="setting-group">
+                        <label for="cfgLlmBaseUrl">Base URL</label>
+                        <input type="text" class="setting-input" id="cfgLlmBaseUrl" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+                    </div>
+                    <div class="setting-group">
+                        <label for="cfgLlmApiKey">API Key</label>
+                        <div class="input-with-toggle">
+                            <input type="password" class="setting-input" id="cfgLlmApiKey" placeholder="留空则不修改">
+                            <button class="btn-icon toggle-key-btn" type="button" title="显示/隐藏">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="settings-section-title">Embedding 模型</div>
+                    <div class="setting-group">
+                        <label for="cfgEmbModel">模型名称</label>
+                        <input type="text" class="setting-input" id="cfgEmbModel" placeholder="BAAI/bge-m3">
+                    </div>
+                    <div class="setting-group">
+                        <label for="cfgEmbBaseUrl">Base URL</label>
+                        <input type="text" class="setting-input" id="cfgEmbBaseUrl" placeholder="https://api.siliconflow.cn/v1">
+                    </div>
+                    <div class="setting-group">
+                        <label for="cfgEmbApiKey">API Key</label>
+                        <div class="input-with-toggle">
+                            <input type="password" class="setting-input" id="cfgEmbApiKey" placeholder="留空则不修改">
+                            <button class="btn-icon toggle-key-btn" type="button" title="显示/隐藏">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="settings-section-title">Reranker</div>
+                    <div class="setting-group">
+                        <label for="cfgRerankerModel">模型名称</label>
+                        <input type="text" class="setting-input" id="cfgRerankerModel" placeholder="BAAI/bge-reranker-v2-m3">
+                    </div>
+                    <button class="save-config-btn" id="saveConfigBtn" type="button">保存配置</button>
+                </div>
+
+                <!-- 检索策略 Tab -->
+                <div class="settings-body tab-panel" id="tabStrategy">
                     <div class="setting-group">
                         <label>检索方式</label>
                         <div class="custom-select" id="retrievalStrategySelect" data-value="default">

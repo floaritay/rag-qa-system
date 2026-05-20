@@ -236,12 +236,12 @@ bm25_docs = None
 # 硅基流动配置
 siliconflow_base_url = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
 siliconflow_api_key = os.getenv("SILICONFLOW_API_KEY")
-siliconflow_embedding_model = "BAAI/bge-m3"
+siliconflow_embedding_model = os.getenv("SILICONFLOW_EMBEDDING_MODEL", "BAAI/bge-m3")
 
 # 百炼平台配置（仅用于LLM）
 bailian_base_url = os.getenv("BAILIAN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 bailian_api_key = os.getenv("BAILIAN_API_KEY")
-bailian_model = "qwen3.5-122b-a10b"
+bailian_model = os.getenv("BAILIAN_MODEL", "qwen3.5-122b-a10b")
 
 # 数据库路径
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -915,6 +915,134 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+def mask_key(key):
+    """Mask API key, showing only last 4 characters"""
+    if not key or len(key) < 8:
+        return "***" if key else ""
+    return "***" + key[-4:]
+
+
+def save_env_file():
+    """Save current config to .env file, preserving comments and formatting"""
+    env_path = os.path.join(base_dir, ".env")
+    updates = {
+        "BAILIAN_API_KEY": bailian_api_key or "",
+        "BAILIAN_BASE_URL": bailian_base_url,
+        "BAILIAN_MODEL": bailian_model,
+        "SILICONFLOW_API_KEY": siliconflow_api_key or "",
+        "SILICONFLOW_BASE_URL": siliconflow_base_url,
+        "SILICONFLOW_EMBEDDING_MODEL": siliconflow_embedding_model,
+    }
+    updated_keys = set()
+
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and "=" in stripped:
+                    key = stripped.split("=", 1)[0].strip()
+                    if key in updates:
+                        lines.append(f"{key}={updates[key]}\n")
+                        updated_keys.add(key)
+                        continue
+                lines.append(line)
+
+    # Append any vars not found in the original file
+    for key, val in updates.items():
+        if key not in updated_keys:
+            lines.append(f"{key}={val}\n")
+
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
+@app.get("/config")
+async def get_config():
+    return {
+        "llm": {
+            "model": bailian_model,
+            "base_url": bailian_base_url,
+            "api_key": mask_key(bailian_api_key),
+        },
+        "embedding": {
+            "model": siliconflow_embedding_model,
+            "base_url": siliconflow_base_url,
+            "api_key": mask_key(siliconflow_api_key),
+        },
+        "reranker": {
+            "model": RERANKER_MODEL,
+        },
+    }
+
+
+@app.post("/config")
+async def update_config(request: dict):
+    global bailian_model, bailian_base_url, bailian_api_key
+    global siliconflow_base_url, siliconflow_api_key, siliconflow_embedding_model
+    global llm, embeddings, reranker, RERANKER_MODEL
+
+    llm_cfg = request.get("llm", {})
+    emb_cfg = request.get("embedding", {})
+    rer_cfg = request.get("reranker", {})
+
+    # Update LLM config
+    if "model" in llm_cfg and llm_cfg["model"]:
+        bailian_model = llm_cfg["model"]
+    if "base_url" in llm_cfg and llm_cfg["base_url"]:
+        bailian_base_url = llm_cfg["base_url"]
+    if "api_key" in llm_cfg and llm_cfg["api_key"] and not llm_cfg["api_key"].startswith("***"):
+        bailian_api_key = llm_cfg["api_key"]
+
+    # Update embedding config
+    if "base_url" in emb_cfg and emb_cfg["base_url"]:
+        siliconflow_base_url = emb_cfg["base_url"]
+    if "api_key" in emb_cfg and emb_cfg["api_key"] and not emb_cfg["api_key"].startswith("***"):
+        siliconflow_api_key = emb_cfg["api_key"]
+    if "model" in emb_cfg and emb_cfg["model"]:
+        siliconflow_embedding_model = emb_cfg["model"]
+
+    # Update reranker model
+    if "model" in rer_cfg and rer_cfg["model"]:
+        RERANKER_MODEL = rer_cfg["model"]
+
+    # Reinitialize components
+    errors = []
+    try:
+        from langchain_openai import ChatOpenAI
+        llm = ChatOpenAI(
+            openai_api_key=bailian_api_key,
+            openai_api_base=bailian_base_url,
+            model_name=bailian_model,
+            temperature=0.3,
+            request_timeout=120,
+            max_retries=2,
+        )
+    except Exception as e:
+        errors.append(f"LLM 初始化失败: {e}")
+
+    try:
+        embeddings = SiliconFlowEmbeddings()
+    except Exception as e:
+        errors.append(f"Embedding 初始化失败: {e}")
+
+    try:
+        reranker = SiliconFlowReranker(model=RERANKER_MODEL)
+    except Exception as e:
+        errors.append(f"Reranker 初始化失败: {e}")
+
+    # Persist to .env
+    try:
+        save_env_file()
+    except Exception as e:
+        errors.append(f"保存 .env 失败: {e}")
+
+    if errors:
+        return {"status": "partial", "message": "; ".join(errors)}
+
+    return {"status": "success", "message": "配置已更新并保存"}
 
 @app.post("/init")
 async def init_knowledge_base(force_rebuild: bool = False):
