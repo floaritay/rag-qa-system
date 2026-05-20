@@ -1074,7 +1074,7 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
                     )
                     answer = answer_obj.content if hasattr(answer_obj, 'content') else str(answer_obj)
                 else:
-                    answer = await asyncio.wait_for(
+                    answer, _sources = await asyncio.wait_for(
                         asyncio.to_thread(
                             rag_query_stateless, user_message,
                             request.retrieval_strategy, request.pre_retrieval, request.post_retrieval
