@@ -934,6 +934,7 @@ def save_env_file():
         "SILICONFLOW_API_KEY": siliconflow_api_key or "",
         "SILICONFLOW_BASE_URL": siliconflow_base_url,
         "SILICONFLOW_EMBEDDING_MODEL": siliconflow_embedding_model,
+        "RERANKER_MODEL": RERANKER_MODEL,
     }
     updated_keys = set()
 
