@@ -41,6 +41,12 @@ const dom = {
     cfgEmbApiKey: $('cfgEmbApiKey'),
     cfgRerankerModel: $('cfgRerankerModel'),
     saveConfigBtn: $('saveConfigBtn'),
+    kbManageBtn: $('kbManageBtn'),
+    kbOverlay: $('kbOverlay'),
+    kbClose: $('kbClose'),
+    kbFileList: $('kbFileList'),
+    kbFileInput: $('kbFileInput'),
+    kbUploadArea: $('kbUploadArea'),
 };
 
 // ============================================================
@@ -593,6 +599,105 @@ async function rebuildKnowledgeBase() {
 }
 
 // ============================================================
+// Knowledge Base Management
+// ============================================================
+const FILE_ICONS = { '.pdf': '📄', '.pptx': '📊', '.docx': '📝', '.md': '📋' };
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function openKbPanel() {
+    dom.kbOverlay.classList.add('open');
+    loadMaterialFiles();
+}
+
+function closeKbPanel() {
+    dom.kbOverlay.classList.remove('open');
+}
+
+async function loadMaterialFiles() {
+    try {
+        const res = await fetch(`${API_URL}/materials`);
+        if (res.ok) {
+            const result = await res.json();
+            renderFileList(result.files || []);
+        } else {
+            dom.kbFileList.innerHTML = '<div class="kb-empty">加载失败</div>';
+        }
+    } catch {
+        dom.kbFileList.innerHTML = '<div class="kb-empty">无法连接到后端</div>';
+    }
+}
+
+function renderFileList(files) {
+    if (!files.length) {
+        dom.kbFileList.innerHTML = '<div class="kb-empty">暂无课程资料</div>';
+        return;
+    }
+    dom.kbFileList.innerHTML = files.map(f => {
+        const ext = '.' + f.name.split('.').pop().toLowerCase();
+        const icon = FILE_ICONS[ext] || '📄';
+        const date = new Date(f.modified * 1000).toLocaleDateString('zh-CN');
+        return `
+            <div class="kb-file-item">
+                <span class="kb-file-icon">${icon}</span>
+                <div class="kb-file-info">
+                    <div class="kb-file-name" title="${f.name}">${f.name}</div>
+                    <div class="kb-file-meta">${formatFileSize(f.size)} · ${date}</div>
+                </div>
+                <button class="kb-file-delete" title="删除" onclick="deleteMaterial('${f.name.replace(/'/g, "\\'")}')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
+            </div>`;
+    }).join('');
+}
+
+async function uploadFiles(fileList) {
+    if (!fileList.length) return;
+    const formData = new FormData();
+    for (const file of fileList) formData.append('files', file);
+
+    try {
+        const res = await fetch(`${API_URL}/materials/upload`, { method: 'POST', body: formData });
+        const result = await res.json();
+        if (result.status === 'success') {
+            showToast(`上传成功: ${result.uploaded.join(', ')}`, 'success');
+            if (confirm('上传成功！是否立即重建知识库以索引新文件？')) rebuildKnowledgeBase();
+        } else if (result.status === 'partial') {
+            showToast(`部分上传成功: ${result.uploaded.join(', ')}`, 'info');
+            if (result.errors) result.errors.forEach(e => showToast(e, 'error'));
+        } else {
+            showToast(`上传失败: ${(result.errors || [result.detail || '未知错误']).join(', ')}`, 'error');
+        }
+        loadMaterialFiles();
+    } catch {
+        showToast('上传失败: 无法连接到后端', 'error');
+    }
+}
+
+async function deleteMaterial(filename) {
+    if (!confirm(`确认删除 "${filename}"？`)) return;
+    try {
+        const res = await fetch(`${API_URL}/materials/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        if (res.ok) {
+            showToast(`已删除: ${filename}`, 'success');
+            loadMaterialFiles();
+            if (confirm('文件已删除！是否立即重建知识库以更新索引？')) rebuildKnowledgeBase();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            showToast(`删除失败: ${err.detail || '未知错误'}`, 'error');
+        }
+    } catch {
+        showToast('删除失败: 无法连接到后端', 'error');
+    }
+}
+
+// ============================================================
 // Input Handling
 // ============================================================
 function autoResize() {
@@ -796,9 +901,36 @@ dom.settingsOverlay.addEventListener('click', (e) => {
 dom.rebuildBtn.addEventListener('click', rebuildKnowledgeBase);
 dom.saveConfigBtn.addEventListener('click', saveConfig);
 
-// Escape to close settings
+// Knowledge Base Management
+dom.kbManageBtn.addEventListener('click', openKbPanel);
+dom.kbClose.addEventListener('click', closeKbPanel);
+dom.kbOverlay.addEventListener('click', (e) => {
+    if (e.target === dom.kbOverlay) closeKbPanel();
+});
+dom.kbFileInput.addEventListener('change', (e) => {
+    uploadFiles(e.target.files);
+    e.target.value = '';
+});
+dom.kbUploadArea.addEventListener('click', () => dom.kbFileInput.click());
+dom.kbUploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dom.kbUploadArea.classList.add('dragover');
+});
+dom.kbUploadArea.addEventListener('dragleave', () => {
+    dom.kbUploadArea.classList.remove('dragover');
+});
+dom.kbUploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dom.kbUploadArea.classList.remove('dragover');
+    uploadFiles(e.dataTransfer.files);
+});
+
+// Escape to close panels
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeSettings();
+    if (e.key === 'Escape') {
+        closeSettings();
+        closeKbPanel();
+    }
 });
 
 // ============================================================

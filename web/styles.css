@@ -1434,6 +1434,186 @@ body {
 }
 
 /* ============================================================
+   Knowledge Base Management Panel
+   ============================================================ */
+.kb-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--t-normal) var(--ease);
+}
+
+.kb-overlay.open {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.kb-panel {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-xl);
+    width: 520px;
+    max-width: 90vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    transform: scale(0.95) translateY(10px);
+    transition: transform var(--t-normal) var(--ease);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.kb-overlay.open .kb-panel {
+    transform: scale(1) translateY(0);
+}
+
+.kb-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.kb-panel-header h3 {
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.kb-panel-body {
+    padding: 20px 24px 24px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.kb-upload-area {
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--r-lg);
+    padding: 28px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color var(--t-fast), background var(--t-fast);
+    margin-bottom: 20px;
+}
+
+.kb-upload-area:hover,
+.kb-upload-area.dragover {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+}
+
+.kb-upload-area svg {
+    color: var(--text-tertiary);
+    margin-bottom: 8px;
+}
+
+.kb-upload-area p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin: 0 0 4px;
+}
+
+.kb-upload-hint {
+    font-size: 12px;
+    color: var(--text-tertiary);
+}
+
+.kb-file-section-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+}
+
+.kb-file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.kb-file-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--r-md);
+    transition: background var(--t-fast);
+    position: relative;
+}
+
+.kb-file-item:hover {
+    background: var(--bg-hover);
+}
+
+.kb-file-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+    width: 24px;
+    text-align: center;
+}
+
+.kb-file-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.kb-file-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.kb-file-meta {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    margin-top: 1px;
+}
+
+.kb-file-delete {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: var(--r-sm);
+    transition: opacity var(--t-fast), color var(--t-fast), background var(--t-fast);
+    flex-shrink: 0;
+}
+
+.kb-file-item:hover .kb-file-delete {
+    opacity: 1;
+}
+
+.kb-file-delete:hover {
+    color: var(--red);
+    background: var(--red-dim);
+}
+
+.kb-empty {
+    text-align: center;
+    padding: 24px 0;
+    color: var(--text-tertiary);
+    font-size: 13px;
+}
+
+/* ============================================================
    Toast Notifications
    ============================================================ */
 .toast-container {

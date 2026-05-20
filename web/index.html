@@ -39,6 +39,12 @@
             </div>
 
             <div class="sidebar-footer">
+                <button class="sidebar-footer-btn" id="kbManageBtn" title="知识库管理">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    <span>知识库管理</span>
+                </button>
                 <button class="sidebar-footer-btn" id="settingsBtn" title="检索策略设置">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="3"/>
@@ -247,6 +253,39 @@
                         <div class="conflict-text">
                             <strong>策略冲突</strong>
                             <span id="strategyConflictMsg">HyDE 与混合检索互斥：HyDE 会将问题替换为假设答案的向量，此时混合检索的 BM25 关键词匹配将失效，因此两者不能同时启用。</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 知识库管理面板 -->
+        <div class="kb-overlay" id="kbOverlay">
+            <div class="kb-panel" id="kbPanel">
+                <div class="kb-panel-header">
+                    <h3>知识库管理</h3>
+                    <button class="btn-icon" id="kbClose">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="kb-panel-body">
+                    <div class="kb-upload-area" id="kbUploadArea">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <p>拖拽文件到此处，或点击选择文件</p>
+                        <span class="kb-upload-hint">支持 PDF / PPTX / DOCX / MD 格式</span>
+                        <input type="file" id="kbFileInput" accept=".pdf,.pptx,.docx,.md" multiple hidden>
+                    </div>
+                    <div class="kb-file-section">
+                        <div class="kb-file-section-title">课程资料</div>
+                        <div class="kb-file-list" id="kbFileList">
+                            <!-- 动态填充 -->
                         </div>
                     </div>
                 </div>

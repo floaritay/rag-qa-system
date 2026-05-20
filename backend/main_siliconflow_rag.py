@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -1136,6 +1136,88 @@ async def init_knowledge_base(force_rebuild: bool = False):
             return {"status": "error", "message": "知识库初始化失败，请确保course_materials文件夹中有支持的文件（PDF/PPTX/DOCX/MD）"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+SUPPORTED_EXTENSIONS = {".pdf", ".pptx", ".docx", ".md"}
+
+@app.get("/materials")
+async def list_materials():
+    """列出 course_materials 目录中的课程资料文件。"""
+    try:
+        materials_path = os.path.join(base_dir, "course_materials")
+        if not os.path.isdir(materials_path):
+            return {"status": "success", "files": []}
+
+        files = []
+        for name in os.listdir(materials_path):
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in SUPPORTED_EXTENSIONS:
+                continue
+            fp = os.path.join(materials_path, name)
+            stat = os.stat(fp)
+            files.append({
+                "name": name,
+                "size": stat.st_size,
+                "modified": stat.st_mtime,
+            })
+        files.sort(key=lambda f: f["modified"], reverse=True)
+        return {"status": "success", "files": files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/materials/upload")
+async def upload_material(files: List[UploadFile] = File(...)):
+    """上传课程资料到 course_materials 目录。"""
+    try:
+        materials_path = os.path.join(base_dir, "course_materials")
+        os.makedirs(materials_path, exist_ok=True)
+
+        uploaded = []
+        errors = []
+        for upload_file in files:
+            safe_name = os.path.basename(upload_file.filename)
+            if not safe_name:
+                errors.append(f"{upload_file.filename}: 无效文件名")
+                continue
+            ext = os.path.splitext(safe_name)[1].lower()
+            if ext not in SUPPORTED_EXTENSIONS:
+                errors.append(f"{safe_name}: 不支持的文件格式（仅支持 PDF/PPTX/DOCX/MD）")
+                continue
+            dest = os.path.join(materials_path, safe_name)
+            content = await upload_file.read()
+            with open(dest, "wb") as f:
+                f.write(content)
+            uploaded.append(safe_name)
+
+        if errors:
+            return {"status": "partial" if uploaded else "error", "uploaded": uploaded, "errors": errors}
+        return {"status": "success", "uploaded": uploaded}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/materials/{filename}")
+async def delete_material(filename: str):
+    """删除 course_materials 目录中的指定文件。"""
+    try:
+        filename = os.path.normpath(filename)
+        if os.path.dirname(filename) != '':
+            raise HTTPException(status_code=400, detail="非法文件名")
+
+        materials_path = os.path.join(base_dir, "course_materials")
+        fp = os.path.join(materials_path, filename)
+        if not os.path.realpath(fp).startswith(os.path.realpath(materials_path) + os.sep):
+            raise HTTPException(status_code=400, detail="非法文件名")
+        if not os.path.isfile(fp):
+            raise HTTPException(status_code=404, detail=f"文件不存在: {filename}")
+
+        os.remove(fp)
+        return {"status": "success", "message": f"已删除: {filename}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/ask", response_model=Response)
 async def ask_question(query: Query, background_tasks: BackgroundTasks):
