@@ -13,7 +13,8 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
+from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader, TextLoader
+from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.embeddings import Embeddings
 from rank_bm25 import BM25Okapi
@@ -486,15 +487,90 @@ def cleanup_old_sessions(max_age_days: int = SESSION_MAX_AGE_DAYS) -> int:
 # 文档加载与分割
 # ============================================================
 
+def _load_pptx(file_path):
+    """加载 .pptx 文件，每个幻灯片生成一个 Document。"""
+    from pptx import Presentation
+    prs = Presentation(file_path)
+    docs = []
+    for slide_num, slide in enumerate(prs.slides, start=1):
+        texts = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for paragraph in shape.text_frame.paragraphs:
+                    text = paragraph.text.strip()
+                    if text:
+                        texts.append(text)
+        if texts:
+            page_content = "\n".join(texts)
+            docs.append(Document(
+                page_content=page_content,
+                metadata={"source": file_path, "page": slide_num}
+            ))
+    return docs
+
+
+def _load_docx(file_path):
+    """加载 .docx 文件，整个文档生成一个 Document（由下游文本分割器分块）。"""
+    from docx import Document as DocxDocument
+    doc = DocxDocument(file_path)
+    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    if not paragraphs:
+        return []
+    page_content = "\n\n".join(paragraphs)
+    return [Document(
+        page_content=page_content,
+        metadata={"source": file_path, "page": 1}
+    )]
+
+
 def load_documents(directory_path):
-    loader = DirectoryLoader(
-        directory_path,
-        glob="**/*.pdf",
-        loader_cls=PyPDFLoader
-    )
-    documents = loader.load()
-    print(f"加载了 {len(documents)} 个PDF文件")
-    return documents
+    """加载目录中的文档，支持 PDF、PPTX、DOCX、MD 格式。"""
+    LOADER_MAP = {
+        ".pdf": lambda fp: PyPDFLoader(fp).load(),
+        ".pptx": _load_pptx,
+        ".docx": _load_docx,
+        ".md": lambda fp: TextLoader(fp, autodetect_encoding=True).load(),
+    }
+
+    all_documents = []
+    stats = {}
+
+    if not os.path.isdir(directory_path):
+        print(f"错误：目录不存在 {directory_path}")
+        return []
+
+    for root, dirs, files in os.walk(directory_path):
+        for filename in files:
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in LOADER_MAP:
+                continue
+
+            file_path = os.path.join(root, filename)
+            if ext not in stats:
+                stats[ext] = {"loaded": 0, "skipped": 0, "errors": []}
+
+            try:
+                docs = LOADER_MAP[ext](file_path)
+                if docs:
+                    all_documents.extend(docs)
+                    stats[ext]["loaded"] += 1
+                    print(f"  [OK] {ext.upper()}: {filename} -> {len(docs)} 个文档")
+                else:
+                    stats[ext]["skipped"] += 1
+                    print(f"  [SKIP] {ext.upper()}: {filename} (无有效文本)")
+            except Exception as e:
+                stats[ext]["skipped"] += 1
+                stats[ext]["errors"].append(f"{filename}: {e}")
+                print(f"  [ERROR] {ext.upper()}: {filename} -> {e}")
+
+    print(f"\n文档加载汇总:")
+    print(f"  总计加载: {len(all_documents)} 个文档片段")
+    for ext, s in sorted(stats.items()):
+        print(f"  {ext.upper()}: 加载={s['loaded']}, 跳过={s['skipped']}")
+        for err in s["errors"]:
+            print(f"    错误: {err}")
+
+    return all_documents
 
 def split_documents(documents):
     text_splitter = RecursiveCharacterTextSplitter(
@@ -1057,7 +1133,7 @@ async def init_knowledge_base(force_rebuild: bool = False):
             message = "知识库重建成功（含BM25索引）" if force_rebuild else "知识库初始化成功"
             return {"status": "success", "message": message}
         else:
-            return {"status": "error", "message": "知识库初始化失败，请确保course_materials文件夹中有PDF文件"}
+            return {"status": "error", "message": "知识库初始化失败，请确保course_materials文件夹中有支持的文件（PDF/PPTX/DOCX/MD）"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
