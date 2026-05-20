@@ -4,133 +4,208 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>智能课程助手</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="app-layout">
-        <!-- 左侧：会话列表 -->
-        <aside class="session-sidebar" id="sessionSidebar">
-            <div class="session-sidebar-header">
-                <h2>💬 会话列表</h2>
-                <button class="new-session-btn" id="newSessionBtn" title="新建会话">
-                    ＋
-                </button>
+    <div class="app">
+        <!-- 侧边栏 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                            <path d="M2 17l10 5 10-5"/>
+                            <path d="M2 12l10 5 10-5"/>
+                        </svg>
+                    </div>
+                    <span class="logo-text">课程助手</span>
+                </div>
             </div>
+
+            <button class="new-chat-btn" id="newChatBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                <span>新建对话</span>
+            </button>
+
             <div class="session-list" id="sessionList">
                 <!-- 动态填充 -->
             </div>
+
+            <div class="sidebar-footer">
+                <button class="sidebar-footer-btn" id="settingsBtn" title="检索策略设置">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    <span>检索策略</span>
+                </button>
+                <button class="sidebar-footer-btn" id="rebuildBtn" title="重建知识库">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="23 4 23 10 17 10"/>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                    </svg>
+                    <span>重建知识库</span>
+                </button>
+            </div>
         </aside>
 
-        <!-- 右侧：主内容 -->
-        <div class="main-container">
-            <header class="title-area">
-                <h1>📚 智能课程助手</h1>
-                <p>基于 RAG 技术的智能问答系统，帮助您快速查询课程资料中的内容</p>
+        <!-- 主内容区 -->
+        <main class="main">
+            <!-- 顶部栏 -->
+            <header class="topbar">
+                <button class="btn-icon menu-btn" id="menuBtn" title="切换侧边栏">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"/>
+                    </svg>
+                </button>
+                <div class="topbar-title" id="topbarTitle">智能课程助手</div>
+                <div class="topbar-status" id="healthIndicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">检查中...</span>
+                </div>
             </header>
 
-            <div class="status-bar">
-                <button class="health-btn" id="healthBtn">
-                    <span class="btn-icon">🔍</span>
-                    检查服务状态
-                </button>
-                <div class="status-box" id="healthStatus"></div>
+            <!-- 聊天区域 -->
+            <div class="chat" id="chat">
+                <div class="chat-messages" id="chatMessages">
+                    <!-- 欢迎页 -->
+                    <div class="welcome" id="welcome">
+                        <div class="welcome-glow"></div>
+                        <div class="welcome-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                                <path d="M2 17l10 5 10-5"/>
+                                <path d="M2 12l10 5 10-5"/>
+                            </svg>
+                        </div>
+                        <h2>智能课程助手</h2>
+                        <p>基于 RAG 技术，精准检索课程资料，为您解答专业问题</p>
+                        <div class="welcome-chips">
+                            <button class="chip" data-question="这门课程的主要内容是什么？">课程主要内容</button>
+                            <button class="chip" data-question="请总结一下最近讲的知识点">知识点总结</button>
+                            <button class="chip" data-question="有哪些重要的概念需要掌握？">重要概念</button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <div class="content-area">
-                <div class="chat-area">
-                    <div class="session-banner" id="sessionBanner" style="display:none;">
-                        <span class="session-banner-title" id="sessionBannerTitle">新对话</span>
-                        <button class="session-banner-close" id="closeSessionBtn" title="退出会话（回到无记忆模式）">✕</button>
-                    </div>
-                    <div class="chatbot-container" id="chatContainer">
-                        <div class="messages" id="messages">
-                            <div class="welcome-message">
-                                <div class="welcome-icon">💬</div>
-                                <p>您好！我是智能课程助手，请输入您的问题开始对话。</p>
+            <!-- 输入区域 -->
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <textarea
+                        id="questionInput"
+                        placeholder="输入您的问题..."
+                        rows="1"
+                    ></textarea>
+                    <button class="send-btn" id="sendBtn" disabled>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"/>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="input-hint">Enter 发送，Shift + Enter 换行</div>
+            </div>
+        </main>
+
+        <!-- 检索策略设置面板 -->
+        <div class="settings-overlay" id="settingsOverlay">
+            <div class="settings-panel" id="settingsPanel">
+                <div class="settings-header">
+                    <h3>检索策略设置</h3>
+                    <button class="btn-icon" id="settingsClose">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="settings-body">
+                    <div class="setting-group">
+                        <label>检索方式</label>
+                        <div class="custom-select" id="retrievalStrategySelect" data-value="default">
+                            <button class="custom-select-trigger" type="button">
+                                <span class="custom-select-label">默认（向量检索）</span>
+                                <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                            </button>
+                            <div class="custom-select-menu">
+                                <div class="custom-select-option selected" data-value="default">
+                                    <span class="option-label">默认（向量检索）</span>
+                                    <span class="option-info" data-tip="使用 FAISS 向量相似度搜索，将问题与文档片段进行语义匹配，适合大多数场景">?</span>
+                                </div>
+                                <div class="custom-select-option" data-value="hybrid">
+                                    <span class="option-label">混合检索（向量 + BM25）</span>
+                                    <span class="option-info" data-tip="结合向量语义检索与 BM25 关键词检索，通过 RRF 融合排序，对专有名词和精确匹配更有效">?</span>
+                                </div>
                             </div>
                         </div>
                     </div>
-
-                    <div class="input-area">
-                        <textarea
-                            id="questionInput"
-                            placeholder="💬 请输入您的问题，例如：多AGV调度系统研究的核心算法是什么？"
-                            rows="1"
-                        ></textarea>
-                        <button class="send-btn" id="sendBtn">
-                            发送 ➤
-                        </button>
+                    <div class="setting-group">
+                        <label>预检索优化</label>
+                        <div class="custom-select" id="preRetrievalSelect" data-value="none">
+                            <button class="custom-select-trigger" type="button">
+                                <span class="custom-select-label">无</span>
+                                <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                            </button>
+                            <div class="custom-select-menu">
+                                <div class="custom-select-option selected" data-value="none">
+                                    <span class="option-label">无</span>
+                                    <span class="option-info" data-tip="直接使用原始问题进行检索，不做任何预处理">?</span>
+                                </div>
+                                <div class="custom-select-option" data-value="rewrite">
+                                    <span class="option-label">查询改写</span>
+                                    <span class="option-info" data-tip="由 LLM 将口语化问题改写为规范检索词，消除指代歧义、补全省略上下文，适合多轮追问">?</span>
+                                </div>
+                                <div class="custom-select-option" data-value="hyde">
+                                    <span class="option-label">HyDE</span>
+                                    <span class="option-info" data-tip="LLM 先生成一段假设性回答，再用该回答的向量去检索，提升语义匹配精度。注意：与混合检索互斥">?</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-
-                    <div class="action-bar">
-                        <button class="clear-btn" id="clearBtn">
-                            🗑️ 清空对话
-                        </button>
+                    <div class="setting-group">
+                        <label>后检索优化</label>
+                        <div class="custom-select" id="postRetrievalSelect" data-value="none">
+                            <button class="custom-select-trigger" type="button">
+                                <span class="custom-select-label">无</span>
+                                <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                            </button>
+                            <div class="custom-select-menu">
+                                <div class="custom-select-option selected" data-value="none">
+                                    <span class="option-label">无</span>
+                                    <span class="option-info" data-tip="直接使用检索返回的文档片段，不做额外排序">?</span>
+                                </div>
+                                <div class="custom-select-option" data-value="rerank">
+                                    <span class="option-label">重排序</span>
+                                    <span class="option-info" data-tip="使用 BGE-Reranker 交叉编码器对候选文档精排，保留最相关的 Top3，显著提升答案准确率">?</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="strategy-conflict" id="strategyConflict">
+                        <div class="conflict-icon">!</div>
+                        <div class="conflict-text">
+                            <strong>策略冲突</strong>
+                            <span id="strategyConflictMsg">HyDE 与混合检索互斥：HyDE 会将问题替换为假设答案的向量，此时混合检索的 BM25 关键词匹配将失效，因此两者不能同时启用。</span>
+                        </div>
                     </div>
                 </div>
-
-                <aside class="sidebar">
-                    <div class="sidebar-card">
-                        <h3>⚙️ 管理操作</h3>
-                        <button class="rebuild-btn" id="rebuildBtn">
-                            🔄 重建知识库
-                        </button>
-                        <div class="status-box" id="rebuildStatus"></div>
-                    </div>
-
-                    <div class="sidebar-card">
-                        <h3>🔧 检索策略</h3>
-                        <div class="strategy-group">
-                            <label for="retrievalStrategy">检索方式</label>
-                            <select id="retrievalStrategy">
-                                <option value="default">默认（向量检索）</option>
-                                <option value="hybrid">混合检索（向量+BM25）</option>
-                            </select>
-                        </div>
-                        <div class="strategy-group">
-                            <label for="preRetrieval">预检索优化</label>
-                            <select id="preRetrieval">
-                                <option value="none">无</option>
-                                <option value="rewrite">查询改写</option>
-                                <option value="hyde">HyDE</option>
-                            </select>
-                        </div>
-                        <div class="strategy-group">
-                            <label for="postRetrieval">后检索优化</label>
-                            <select id="postRetrieval">
-                                <option value="none">无</option>
-                                <option value="rerank">重排序</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="sidebar-card">
-                        <h3>📖 使用说明</h3>
-                        <ul>
-                            <li>点击左侧"＋"新建会话</li>
-                            <li>在同一会话中可连续追问</li>
-                            <li>系统会记住对话上下文</li>
-                            <li>如答案不准确，可尝试重建知识库</li>
-                        </ul>
-                    </div>
-
-                    <div class="sidebar-card">
-                        <h3>💡 提示</h3>
-                        <ul>
-                            <li>问题越具体，回答越准确</li>
-                            <li>重建知识库需要较长时间</li>
-                            <li>支持中英文问答</li>
-                        </ul>
-                    </div>
-                </aside>
             </div>
         </div>
+
+        <!-- 侧边栏遮罩（移动端） -->
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
     </div>
 
-    <div class="loading-overlay" id="loadingOverlay">
-        <div class="loading-spinner"></div>
-        <p>正在处理中...</p>
-    </div>
+    <!-- Toast 通知 -->
+    <div class="toast-container" id="toastContainer"></div>
 
     <script src="app.js"></script>
 </body>

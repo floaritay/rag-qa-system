@@ -329,6 +329,9 @@ class SiliconFlowReranker:
                 idx = item['index']
                 score = item['relevance_score']
                 doc = documents[idx]
+                # Attach rerank score to metadata
+                if hasattr(doc, 'metadata'):
+                    doc.metadata['rerank_score'] = round(score, 4)
                 reranked.append(doc)
             return reranked
         except Exception as e:
@@ -741,7 +744,12 @@ def hybrid_retrieve(query: str, k: int = DEFAULT_TOP_K) -> list:
 
     # 按融合分数排序
     sorted_items = sorted(doc_scores.values(), key=lambda x: x["score"], reverse=True)
-    result = [item["doc"] for item in sorted_items[:k]]
+    result = []
+    for item in sorted_items[:k]:
+        doc = item["doc"]
+        if hasattr(doc, 'metadata'):
+            doc.metadata['rrf_score'] = round(item["score"], 6)
+        result.append(doc)
     print(f"混合检索: 向量={len(vector_docs)}篇, BM25={len(bm25_results)}篇, 融合后={len(result)}篇")
     return result
 
@@ -761,10 +769,31 @@ def format_history(session_id: str) -> str:
         lines.append(f"{role_label}：{msg['content']}")
     return "### 对话历史：\n" + "\n\n".join(lines) + "\n\n"
 
+def extract_sources(docs, top_k=DEFAULT_TOP_K):
+    """从检索文档中提取来源信息"""
+    sources = []
+    for i, doc in enumerate(docs[:top_k]):
+        meta = doc.metadata if hasattr(doc, 'metadata') else {}
+        source = {
+            "rank": i + 1,
+            "content": doc.page_content[:500] if hasattr(doc, 'page_content') else str(doc)[:500],
+            "source": meta.get("source", ""),
+            "page": meta.get("page", None),
+        }
+        if "vector_score" in meta:
+            source["vector_score"] = meta["vector_score"]
+        if "rrf_score" in meta:
+            source["rrf_score"] = meta["rrf_score"]
+        if "rerank_score" in meta:
+            source["rerank_score"] = meta["rerank_score"]
+        sources.append(source)
+    return sources
+
+
 def rag_query(question: str, session_id: Optional[str] = None,
               retrieval_strategy: str = "default",
               pre_retrieval: str = "none",
-              post_retrieval: str = "none") -> str:
+              post_retrieval: str = "none") -> tuple:
     # 1. 预检索优化
     search_query = question
     if pre_retrieval == "rewrite":
@@ -774,13 +803,24 @@ def rag_query(question: str, session_id: Optional[str] = None,
 
     # 2. 检索
     if pre_retrieval == "hyde":
-        # HyDE：用假设答案的 embedding 向量检索
+        # HyDE：用假设答案的 embedding 向量检索（带分数）
         hyde_embedding = embeddings.embed_query(search_query)
-        docs = vectorstore.similarity_search_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
+        scored = vectorstore.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
+        docs = []
+        for doc, score in scored:
+            if hasattr(doc, 'metadata'):
+                doc.metadata['vector_score'] = round(float(score), 4)
+            docs.append(doc)
     elif retrieval_strategy == "hybrid":
         docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K)
     else:
-        docs = retriever.invoke(search_query)
+        # 默认向量检索（带分数）
+        scored = vectorstore.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
+        docs = []
+        for doc, score in scored:
+            if hasattr(doc, 'metadata'):
+                doc.metadata['vector_score'] = round(float(score), 4)
+            docs.append(doc)
 
     # 3. 后检索优化：重排序（用原始问题，不用改写后的查询词）
     if post_retrieval == "rerank" and reranker:
@@ -790,22 +830,26 @@ def rag_query(question: str, session_id: Optional[str] = None,
     top_docs = docs[:DEFAULT_TOP_K]
     context = "\n\n".join([doc.page_content for doc in top_docs])
 
-    # 5. 加载历史
+    # 5. 提取来源
+    sources = extract_sources(docs)
+
+    # 6. 加载历史
     history_text = format_history(session_id)
 
-    # 6. Prompt + LLM
+    # 7. Prompt + LLM
     prompt_text = PROMPT_WITH_HISTORY.format(
         context=context,
         history=history_text,
         question=question
     )
     answer = llm.invoke(prompt_text)
-    return answer.content if hasattr(answer, 'content') else str(answer)
+    answer_text = answer.content if hasattr(answer, 'content') else str(answer)
+    return answer_text, sources
 
 def rag_query_stateless(question: str,
                         retrieval_strategy: str = "default",
                         pre_retrieval: str = "none",
-                        post_retrieval: str = "none") -> str:
+                        post_retrieval: str = "none") -> tuple:
     """无状态 RAG 查询"""
     search_query = question
     if pre_retrieval == "rewrite":
@@ -815,20 +859,32 @@ def rag_query_stateless(question: str,
 
     if pre_retrieval == "hyde":
         hyde_embedding = embeddings.embed_query(search_query)
-        docs = vectorstore.similarity_search_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
+        scored = vectorstore.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
+        docs = []
+        for doc, score in scored:
+            if hasattr(doc, 'metadata'):
+                doc.metadata['vector_score'] = round(float(score), 4)
+            docs.append(doc)
     elif retrieval_strategy == "hybrid":
         docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K)
     else:
-        docs = retriever.invoke(search_query)
+        scored = vectorstore.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
+        docs = []
+        for doc, score in scored:
+            if hasattr(doc, 'metadata'):
+                doc.metadata['vector_score'] = round(float(score), 4)
+            docs.append(doc)
 
     if post_retrieval == "rerank" and reranker:
         docs = reranker.rerank(question, docs, top_n=DEFAULT_TOP_K)
 
     top_docs = docs[:DEFAULT_TOP_K]
     context = "\n\n".join([doc.page_content for doc in top_docs])
+    sources = extract_sources(docs)
     prompt_text = PROMPT.format(context=context, question=question)
     answer = llm.invoke(prompt_text)
-    return answer.content if hasattr(answer, 'content') else str(answer)
+    answer_text = answer.content if hasattr(answer, 'content') else str(answer)
+    return answer_text, sources
 
 def generate_summary_task(session_id: str):
     """后台任务：生成会话摘要"""
@@ -899,7 +955,7 @@ async def ask_question(query: Query, background_tasks: BackgroundTasks):
 
         try:
             if session_id:
-                answer = await asyncio.wait_for(
+                answer, sources = await asyncio.wait_for(
                     asyncio.to_thread(
                         rag_query, query.question, session_id,
                         query.retrieval_strategy, query.pre_retrieval, query.post_retrieval
@@ -907,7 +963,7 @@ async def ask_question(query: Query, background_tasks: BackgroundTasks):
                     timeout=180
                 )
             else:
-                answer = await asyncio.wait_for(
+                answer, sources = await asyncio.wait_for(
                     asyncio.to_thread(
                         rag_query_stateless, query.question,
                         query.retrieval_strategy, query.pre_retrieval, query.post_retrieval
@@ -932,7 +988,7 @@ async def ask_question(query: Query, background_tasks: BackgroundTasks):
             if msg_count > 0 and msg_count % SUMMARY_TRIGGER_COUNT == 0:
                 background_tasks.add_task(generate_summary_task, session_id)
 
-        return Response(answer=answer, sources=[], session_id=session_id)
+        return Response(answer=answer, sources=sources, session_id=session_id)
     except HTTPException:
         raise
     except Exception as e:
@@ -975,7 +1031,7 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
 
         try:
             if session_id:
-                answer = await asyncio.wait_for(
+                answer, _sources = await asyncio.wait_for(
                     asyncio.to_thread(
                         rag_query, user_message, session_id,
                         request.retrieval_strategy, request.pre_retrieval, request.post_retrieval
