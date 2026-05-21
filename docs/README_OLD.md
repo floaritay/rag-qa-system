@@ -2,7 +2,7 @@
 基于 RAG（检索增强生成）技术的智能问答系统，帮助学生快速查询课程资料中的内容。
 
 ## 项目简介
-智能课程助手是一个 AI 驱动的问答系统，能够从课程资料（PDF / PPTX / DOCX / Markdown）中检索相关信息并生成准确回答。系统采用前后端分离架构，后端使用 FastAPI + LangChain 构建 RAG 服务，前端支持多种使用方式：
+智能课程助手是一个 AI 驱动的问答系统，能够从课程 PDF 资料中检索相关信息并生成准确回答。系统采用前后端分离架构，后端使用 FastAPI + LangChain 构建 RAG 服务，前端支持多种使用方式：
 1. 原生 Web 界面（HTML + CSS + JavaScript）（web/ 文件夹）
 2. 本地安装 Open WebUI
 
@@ -23,8 +23,11 @@
 │   ├── knowledge_base.py      # 知识库构建模块
 │   ├── qa_chain.py            # 问答链模块
 │   └── requirements.txt       # Python 依赖
+├── frontend/                   # 前端服务
+│   ├── app.py                 # 主服务
+│   └── requirements.txt       # Python 依赖
 ├── course_materials/           # 课程资料存放目录（不存在需手动创建）
-│   └── *.pdf / *.pptx / *.docx / *.md  # 支持多格式课程文件
+│   └── *.pdf                  # PDF 课程文件
 ├── course_knowledge_base/      # 向量库存储目录（自动生成）
 │   ├── index.faiss        # FAISS 索引文件
 │   └── index.pkl          # FAISS 元数据文件
@@ -53,7 +56,13 @@ cd backend
 pip install -r requirements.txt
 ```
 
-3. **配置环境变量**
+3. **安装前端依赖**
+```bash
+cd ../frontend
+pip install -r requirements.txt
+```
+
+4. **配置环境变量**
 ```bash
 # Windows
 set BAILIAN_API_KEY=你的百炼平台API密钥
@@ -64,7 +73,7 @@ export BAILIAN_API_KEY=你的百炼平台API密钥
 或者使用 `.env` 文件
 
 5. **准备课程资料**
-将课程资料放入 `course_materials` 文件夹（如果不存在请创建）。支持的格式：PDF、PPTX、DOCX、Markdown。也可通过前端界面的"知识库管理"面板直接上传文件。
+将 PDF 格式的课程资料放入 `course_materials` 文件夹（如果不存在请创建）。
 
 6. **启动后端服务**
 ```bash
@@ -104,9 +113,6 @@ curl -X POST http://localhost:8001/init
 | `/health`              | GET  | 健康检查            |
 | `/ask`                 | POST | 问答接口            |
 | `/init`                | POST | 初始化/重建知识库       |
-| `/materials`           | GET  | 列出课程资料文件        |
-| `/materials/upload`    | POST | 上传课程资料文件        |
-| `/materials/{filename}`| DELETE | 删除指定课程资料文件    |
 | `/v1/models`           | GET  | 返回可用模型列表（OpenAI兼容）  |
 | `/v1/chat/completions` | POST | 处理OpenAI格式的聊天请求（OpenAI兼容） |
 
@@ -137,9 +143,8 @@ curl -X POST http://localhost:8001/init?force_rebuild=true
 ## 功能特性
 
 - **智能问答**：基于课程资料进行精准问答，回答有据可依
-- **多格式支持**：支持 PDF、PPTX、DOCX、Markdown 格式的课程资料
-- **知识库管理**：通过 Web 界面查看、上传、删除课程资料，并可一键重建知识库
-- **批量处理**：支持批量加载多格式文件构建向量库
+- **知识库管理**：支持知识库初始化和重建
+- **批量处理**：支持批量加载 PDF 文件构建向量库
 - **多界面选择**：Open WebUI / 原生 Web 界面
 - **OpenAI兼容**：提供OpenAI兼容API，支持Open WebUI等客户端
 - **服务监控**：提供健康检查接口
@@ -155,8 +160,8 @@ curl -X POST http://localhost:8001/init?force_rebuild=true
     PDF文档 → 文本分割 → 向量化 → 存储
 ```
 
-1. **文档处理**：使用 PyPDFLoader 加载 PDF，python-pptx 加载 PPTX，python-docx 加载 DOCX，TextLoader 加载 Markdown，RecursiveCharacterTextSplitter 分割文本
-2. **向量化**：调用 SiliconFlow 嵌入模型将文本转换为向量
+1. **文档处理**：使用 PyPDFLoader 加载 PDF，RecursiveCharacterTextSplitter 分割文本
+2. **向量化**：调用百炼平台嵌入模型将文本转换为向量
 3. **存储**：使用 FAISS 本地向量数据库存储
 4. **检索**：基于语义相似度检索相关文档片段
 5. **生成**：LLM 基于检索内容生成回答
@@ -168,18 +173,16 @@ curl -X POST http://localhost:8001/init?force_rebuild=true
 ## 常见问题
 
 需要重建知识库的情况 ：
-- 新增/删除/修改了课程资料文件（PDF / PPTX / DOCX / MD）
+- 新增/删除/修改了 PDF 文件
 - 更换了嵌入模型
 - 修改了文本分割参数（chunk_size, chunk_overlap）
-
-可通过前端界面"知识库管理"面板上传/删除文件后，按提示一键重建知识库。
 
 如有问题，请查看 [DEPLOYMENT_GUIDE.md](./docs/DEPLOYMENT_GUIDE.md) 中的常见问题部分，或查看 [solve.txt](./docs/solve.txt) 中的问题解决记录。
 
 ## 注意事项
 
 - 确保 `BAILIAN_API_KEY` 环境变量已正确设置
-- 课程资料变更后需调用 `/init` 接口重建知识库，或通过前端"知识库管理"面板操作后一键重建
+- 课程资料变更后需调用 `/init` 接口重建知识库
 - 向量库文件存储在 `course_knowledge_base` 目录
 - Open WebUI在conda环境运行，后端在全局环境运行是可以的，它们通过网络端口通信
 

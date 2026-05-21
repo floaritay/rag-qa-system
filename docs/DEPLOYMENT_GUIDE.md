@@ -1,13 +1,13 @@
 # 校园课程助手部署与使用指南
 
 ## 项目概述
-校园课程助手是一个基于RAG（检索增强生成）技术的智能问答系统，使用LangChain作为后端核心，Open WebUI或Gradio作为前端界面，帮助学生快速获取课程相关信息。
+校园课程助手是一个基于RAG（检索增强生成）技术的智能问答系统，使用LangChain作为后端核心，原生Web界面或Open WebUI作为前端界面，帮助学生快速获取课程相关信息。
 
 ## 技术架构
 - **后端**：LangChain + FastAPI
 - **向量存储**：FAISS（本地存储）
 - **模型**：百炼平台的"qwen-plus-2025-07-28"和"text-embedding-v2"
-- **前端**：Open WebUI / Gradio / Web
+- **前端**：原生 Web 界面 / Open WebUI
 
 ## 部署与使用步骤
 
@@ -26,8 +26,6 @@ cd d:\你的文件目录
 # 安装后端依赖
 pip install -r backend\requirements.txt
 
-# 安装前端依赖（Gradio）
-pip install -r frontend\requirements.txt
 ```
 
 ### 2. 配置环境变量
@@ -71,23 +69,13 @@ curl -X POST http://localhost:8001/init?force_rebuild=true
 
 ### 6. 部署前端界面
 
-#### 方式一：使用 Gradio（快速验证）
-```bash
-# 进入frontend目录
-cd d:\你的文件目录\frontend
-
-# 启动Gradio服务
-python app.py
-```
-访问 http://localhost:7860 即可使用
-
-#### 方式二：使用 Web 界面（快速验证）
+#### 方式一：使用 Web 界面（快速验证）
 ```bash
 python -m http.server 8080 --directory web
 ```
 然后浏览器访问 http://localhost:8080。
 
-#### 方式三：启动Docker容器部署Open WebUI
+#### 方式二：启动Docker容器部署Open WebUI
 启动docker desktop后，执行以下命令
 ```bash
 # 使用powershell执行
@@ -225,7 +213,7 @@ open-webui serve
 │   ├── qa_chain.py            # 问答链模块
 │   └── requirements.txt       # Python 依赖
 ├── frontend/                   # 前端服务
-│   ├── app.py                 # Gradio Web 界面
+│   ├── app.py                 # 主服务
 │   └── requirements.txt       # Python 依赖
 ├── course_materials/           # 课程资料存放目录（不存在需手动创建）
 │   └── *.pdf                  # PDF 课程文件

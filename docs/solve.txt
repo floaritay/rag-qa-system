@@ -275,7 +275,7 @@
 - 日志显示服务确实启动了（"Started server process [1]"），但奇怪的是它卡在了"Waiting for application startup"之后就没有继续了
 
 ### 解决方法
-本地使用Open WebUI或gradio自制UI,我都使用了
+使用Open WebUI或原生Web界面
 
 ## 问题16：Open WebUI连接后端API出现网络错误
 

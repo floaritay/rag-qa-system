@@ -637,24 +637,42 @@ function renderFileList(files) {
         dom.kbFileList.innerHTML = '<div class="kb-empty">暂无课程资料</div>';
         return;
     }
-    dom.kbFileList.innerHTML = files.map(f => {
+    dom.kbFileList.innerHTML = '';
+    files.forEach(f => {
         const ext = '.' + f.name.split('.').pop().toLowerCase();
         const icon = FILE_ICONS[ext] || '📄';
         const date = new Date(f.modified * 1000).toLocaleDateString('zh-CN');
-        return `
-            <div class="kb-file-item">
-                <span class="kb-file-icon">${icon}</span>
-                <div class="kb-file-info">
-                    <div class="kb-file-name" title="${f.name}">${f.name}</div>
-                    <div class="kb-file-meta">${formatFileSize(f.size)} · ${date}</div>
-                </div>
-                <button class="kb-file-delete" title="删除" onclick="deleteMaterial('${f.name.replace(/'/g, "\\'")}')">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                </button>
-            </div>`;
-    }).join('');
+
+        const item = document.createElement('div');
+        item.className = 'kb-file-item';
+
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'kb-file-icon';
+        iconSpan.textContent = icon;
+
+        const info = document.createElement('div');
+        info.className = 'kb-file-info';
+
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'kb-file-name';
+        nameDiv.title = f.name;
+        nameDiv.textContent = f.name;
+
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'kb-file-meta';
+        metaDiv.textContent = `${formatFileSize(f.size)} · ${date}`;
+
+        info.append(nameDiv, metaDiv);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'kb-file-delete';
+        delBtn.title = '删除';
+        delBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+        delBtn.addEventListener('click', () => deleteMaterial(f.name));
+
+        item.append(iconSpan, info, delBtn);
+        dom.kbFileList.appendChild(item);
+    });
 }
 
 async function uploadFiles(fileList) {
