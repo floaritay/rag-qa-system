@@ -324,7 +324,7 @@ async function deleteSession(sessionId) {
         await fetch(`${API_URL}/sessions/${sessionId}`, { method: 'DELETE' });
         if (currentSessionId === sessionId) {
             currentSessionId = null;
-            dom.topbarTitle.textContent = '智能课程助手';
+            dom.topbarTitle.textContent = '个人知识库';
             dom.chatMessages.innerHTML = '';
             showWelcome();
         }
@@ -348,8 +348,8 @@ function showWelcome() {
                     <path d="M2 12l10 5 10-5"/>
                 </svg>
             </div>
-            <h2>智能课程助手</h2>
-            <p>基于 RAG 技术，精准检索课程资料，为您解答专业问题</p>
+            <h2>个人知识库</h2>
+            <p>基于 RAG 技术，精准检索文档，为您解答专业问题</p>
             <div class="welcome-chips">
                 <button class="chip" data-question="这门课程的主要内容是什么？">课程主要内容</button>
                 <button class="chip" data-question="请总结一下最近讲的知识点">知识点总结</button>
@@ -453,6 +453,75 @@ function addMessage(content, type, animate = true, sources = null) {
     return msg;
 }
 
+function createStreamingMessage() {
+    const welcome = dom.chatMessages.querySelector('.welcome');
+    if (welcome) welcome.remove();
+
+    const msg = document.createElement('div');
+    msg.className = 'message assistant';
+    msg.innerHTML = `
+        <div class="message-avatar" style="background: linear-gradient(135deg, #c87941 0%, #a85d30 100%); color: #fff; flex-shrink: 0; width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 14px;">AI</div>
+        <div class="message-body">
+            <div class="message-role">Assistant</div>
+            <div class="message-content"><span class="streaming-cursor"></span></div>
+            <div class="sources-panel-slot"></div>
+        </div>
+    `;
+    dom.chatMessages.appendChild(msg);
+    scrollChatBottom();
+    return msg;
+}
+
+function renderSourcesPanel(container, sources) {
+    if (!sources || sources.length === 0) return;
+
+    const items = sources.map(s => {
+        const fileName = s.source ? s.source.split(/[\\/]/).pop() : '未知';
+        const pageLabel = s.page != null ? ` · 第 ${s.page + 1} 页` : '';
+
+        const badges = [];
+        if (s.vector_score != null) {
+            badges.push(`<span class="source-badge score-vector" title="FAISS L2 距离，越小越相关">距离 ${s.vector_score.toFixed(2)}</span>`);
+        }
+        if (s.rrf_score != null) {
+            badges.push(`<span class="source-badge score-rrf" title="RRF 融合分数，越大越相关">RRF ${s.rrf_score.toFixed(4)}</span>`);
+        }
+        if (s.rerank_score != null) {
+            badges.push(`<span class="source-badge score-rerank" title="重排序相关度，越大越相关">${(s.rerank_score * 100).toFixed(1)}%</span>`);
+        }
+
+        return `
+            <div class="source-item">
+                <div class="source-header">
+                    <span class="source-rank">#${s.rank}</span>
+                    <span class="source-file">${escapeHtml(fileName)}${pageLabel}</span>
+                    <span class="source-badges">${badges.join('')}</span>
+                </div>
+                <div class="source-text">${escapeHtml(s.content)}</div>
+            </div>
+        `;
+    }).join('');
+
+    container.innerHTML = `
+        <div class="sources-panel">
+            <button class="sources-toggle" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"/>
+                </svg>
+                <span>检索来源（${sources.length} 条）</span>
+            </button>
+            <div class="sources-list">${items}</div>
+        </div>
+    `;
+
+    const toggle = container.querySelector('.sources-toggle');
+    const list = container.querySelector('.sources-list');
+    toggle.addEventListener('click', () => {
+        toggle.classList.toggle('open');
+        list.style.display = list.style.display === 'block' ? 'none' : 'block';
+    });
+}
+
 function addErrorMessage(content) {
     const msg = document.createElement('div');
     msg.className = 'message assistant';
@@ -535,7 +604,7 @@ async function askQuestion(question) {
         body.pre_retrieval = getSelectValue('preRetrievalSelect');
         body.post_retrieval = getSelectValue('postRetrievalSelect');
 
-        const res = await fetch(`${API_URL}/ask`, {
+        const res = await fetch(`${API_URL}/ask/stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
@@ -543,19 +612,55 @@ async function askQuestion(question) {
 
         removeTypingIndicator();
 
-        if (res.ok) {
-            const result = await res.json();
-            const answer = result.answer || '抱歉，无法获取回答';
-            const sources = result.sources || [];
-            addMessage(answer, 'assistant', true, sources);
-
-            if (result.session_id && !currentSessionId) {
-                currentSessionId = result.session_id;
-            }
-            loadSessionList();
-        } else {
+        if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             addErrorMessage(`请求失败：${err.detail || '未知错误'}`);
+        } else {
+            // Pre-create assistant message shell
+            const msgEl = createStreamingMessage();
+            const contentEl = msgEl.querySelector('.message-content');
+            const sourcesContainer = msgEl.querySelector('.sources-panel-slot');
+            let accumulated = '';
+            let sourcesRendered = false;
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // keep incomplete line in buffer
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed.startsWith('data: ')) continue;
+                    const data = trimmed.slice(6);
+                    if (data === '[DONE]') continue;
+
+                    try {
+                        const event = JSON.parse(data);
+                        if (event.type === 'sources' && !sourcesRendered) {
+                            sourcesRendered = true;
+                            renderSourcesPanel(sourcesContainer, event.data);
+                        } else if (event.type === 'token') {
+                            accumulated += event.data;
+                            contentEl.innerHTML = renderMarkdown(accumulated);
+                            scrollChatBottom();
+                        }
+                    } catch {
+                        // skip malformed JSON
+                    }
+                }
+            }
+
+            if (!accumulated) {
+                contentEl.innerHTML = '<p>抱歉，无法获取回答</p>';
+            }
+            loadSessionList();
         }
     } catch (error) {
         removeTypingIndicator();
@@ -634,7 +739,7 @@ async function loadMaterialFiles() {
 
 function renderFileList(files) {
     if (!files.length) {
-        dom.kbFileList.innerHTML = '<div class="kb-empty">暂无课程资料</div>';
+        dom.kbFileList.innerHTML = '<div class="kb-empty">暂无文档</div>';
         return;
     }
     dom.kbFileList.innerHTML = '';

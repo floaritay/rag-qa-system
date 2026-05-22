@@ -1,8 +1,8 @@
-# 智能课程助手
-基于 RAG（检索增强生成）技术的智能问答系统，帮助学生快速查询课程资料中的内容。
+# 个人知识库
+基于 RAG（检索增强生成）技术的智能问答系统，帮助用户快速查询个人文档中的内容。
 
 ## 项目简介
-智能课程助手是一个 AI 驱动的问答系统，能够从课程 PDF 资料中检索相关信息并生成准确回答。系统采用前后端分离架构，后端使用 FastAPI + LangChain 构建 RAG 服务，前端支持多种使用方式：
+个人知识库是一个 AI 驱动的问答系统，能够从个人文档（PDF/PPTX/DOCX/MD）中检索相关信息并生成准确回答。系统采用前后端分离架构，后端使用 FastAPI + LangChain 构建 RAG 服务，前端支持多种使用方式：
 1. 原生 Web 界面（HTML + CSS + JavaScript）（web/ 文件夹）
 2. 本地安装 Open WebUI
 
@@ -26,8 +26,8 @@
 ├── frontend/                   # 前端服务
 │   ├── app.py                 # 主服务
 │   └── requirements.txt       # Python 依赖
-├── course_materials/           # 课程资料存放目录（不存在需手动创建）
-│   └── *.pdf                  # PDF 课程文件
+├── course_materials/           # 文档存放目录（不存在需手动创建）
+│   └── *.pdf                  # PDF 文档文件
 ├── course_knowledge_base/      # 向量库存储目录（自动生成）
 │   ├── index.faiss        # FAISS 索引文件
 │   └── index.pkl          # FAISS 元数据文件
@@ -63,17 +63,19 @@ pip install -r requirements.txt
 ```
 
 4. **配置环境变量**
-```bash
-# Windows
-set BAILIAN_API_KEY=你的百炼平台API密钥
+在项目根目录创建 `.env` 文件：
 
-# Linux/Mac
-export BAILIAN_API_KEY=你的百炼平台API密钥
 ```
-或者使用 `.env` 文件
+LLM_API_KEY=你的LLM API密钥
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen3.5-122b-a10b
+EMBEDDING_API_KEY=你的嵌入API密钥
+EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-m3
+```
 
-5. **准备课程资料**
-将 PDF 格式的课程资料放入 `course_materials` 文件夹（如果不存在请创建）。
+5. **准备文档资料**
+将文档（PDF/PPTX/DOCX/MD）放入 `course_materials` 文件夹（如果不存在请创建）。
 
 6. **启动后端服务**
 ```bash
@@ -83,7 +85,7 @@ python main.py
 后端服务将在 http://localhost:8001 运行。  
 ![后端服务](./images/image1.png)
 
-7. **初始化知识库（首次使用或新增课程资料时）**
+7. **初始化知识库（首次使用或新增文档时）**
 ```bash
 # 使用 PowerShell
 Invoke-WebRequest -Uri "http://localhost:8001/init" -Method POST
@@ -142,7 +144,7 @@ curl -X POST http://localhost:8001/init?force_rebuild=true
 
 ## 功能特性
 
-- **智能问答**：基于课程资料进行精准问答，回答有据可依
+- **智能问答**：基于文档进行精准问答，回答有据可依
 - **知识库管理**：支持知识库初始化和重建
 - **批量处理**：支持批量加载 PDF 文件构建向量库
 - **多界面选择**：Open WebUI / 原生 Web 界面
@@ -173,7 +175,7 @@ curl -X POST http://localhost:8001/init?force_rebuild=true
 ## 常见问题
 
 需要重建知识库的情况 ：
-- 新增/删除/修改了 PDF 文件
+- 新增/删除/修改了文档文件
 - 更换了嵌入模型
 - 修改了文本分割参数（chunk_size, chunk_overlap）
 
@@ -181,8 +183,8 @@ curl -X POST http://localhost:8001/init?force_rebuild=true
 
 ## 注意事项
 
-- 确保 `BAILIAN_API_KEY` 环境变量已正确设置
-- 课程资料变更后需调用 `/init` 接口重建知识库
+- 确保 `.env` 文件中的 API 密钥已正确设置
+- 文档变更后需调用 `/init` 接口重建知识库
 - 向量库文件存储在 `course_knowledge_base` 目录
 - Open WebUI在conda环境运行，后端在全局环境运行是可以的，它们通过网络端口通信
 

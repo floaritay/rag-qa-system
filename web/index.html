@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智能课程助手</title>
+    <title>个人知识库</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
@@ -22,7 +22,7 @@
                             <path d="M2 12l10 5 10-5"/>
                         </svg>
                     </div>
-                    <span class="logo-text">课程助手</span>
+                    <span class="logo-text">知识库</span>
                 </div>
             </div>
 
@@ -71,7 +71,7 @@
                         <polyline points="15 18 9 12 15 6"/>
                     </svg>
                 </button>
-                <div class="topbar-title" id="topbarTitle">智能课程助手</div>
+                <div class="topbar-title" id="topbarTitle">个人知识库</div>
                 <div class="topbar-status" id="healthIndicator">
                     <span class="status-dot"></span>
                     <span class="status-text">检查中...</span>
@@ -91,8 +91,8 @@
                                 <path d="M2 12l10 5 10-5"/>
                             </svg>
                         </div>
-                        <h2>智能课程助手</h2>
-                        <p>基于 RAG 技术，精准检索课程资料，为您解答专业问题</p>
+                        <h2>个人知识库</h2>
+                        <p>基于 RAG 技术，精准检索文档，为您解答专业问题</p>
                         <div class="welcome-chips">
                             <button class="chip" data-question="这门课程的主要内容是什么？">课程主要内容</button>
                             <button class="chip" data-question="请总结一下最近讲的知识点">知识点总结</button>
@@ -148,7 +148,7 @@
                     </div>
                     <div class="setting-group">
                         <label for="cfgLlmBaseUrl">Base URL</label>
-                        <input type="text" class="setting-input" id="cfgLlmBaseUrl" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+                        <input type="text" class="setting-input" id="cfgLlmBaseUrl" placeholder="OpenAI 兼容 LLM API 地址">
                     </div>
                     <div class="setting-group">
                         <label for="cfgLlmApiKey">API Key</label>
@@ -166,7 +166,7 @@
                     </div>
                     <div class="setting-group">
                         <label for="cfgEmbBaseUrl">Base URL</label>
-                        <input type="text" class="setting-input" id="cfgEmbBaseUrl" placeholder="https://api.siliconflow.cn/v1">
+                        <input type="text" class="setting-input" id="cfgEmbBaseUrl" placeholder="OpenAI 兼容嵌入 API 地址">
                     </div>
                     <div class="setting-group">
                         <label for="cfgEmbApiKey">API Key</label>
@@ -283,7 +283,7 @@
                         <input type="file" id="kbFileInput" accept=".pdf,.pptx,.docx,.md" multiple hidden>
                     </div>
                     <div class="kb-file-section">
-                        <div class="kb-file-section-title">课程资料</div>
+                        <div class="kb-file-section-title">文档列表</div>
                         <div class="kb-file-list" id="kbFileList">
                             <!-- 动态填充 -->
                         </div>

@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
-app = FastAPI(title="课程助手API（会话记忆版）")
+app = FastAPI(title="知识库API（会话记忆版）")
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,7 +55,7 @@ class OpenAIModel(BaseModel):
     id: str
     object: str = "model"
     created: int = Field(default_factory=lambda: int(time.time()))
-    owned_by: str = "course-assistant"
+    owned_by: str = "knowledge-base"
 
 class OpenAIModelsResponse(BaseModel):
     object: str = "list"
@@ -66,7 +66,7 @@ class OpenAIMessage(BaseModel):
     content: str
 
 class OpenAIChatRequest(BaseModel):
-    model: str = "course-assistant"
+    model: str = "knowledge-base"
     messages: List[OpenAIMessage]
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = None
@@ -87,7 +87,7 @@ class OpenAIChatResponse(BaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{uuid.uuid4().hex[:24]}")
     object: str = "chat.completion"
     created: int = Field(default_factory=lambda: int(time.time()))
-    model: str = "course-assistant"
+    model: str = "knowledge-base"
     choices: List[OpenAIChatChoice]
     usage: OpenAIUsage = OpenAIUsage()
 
@@ -119,26 +119,25 @@ class SessionHistoryResponse(BaseModel):
 # Prompt 模板
 # ============================================================
 
-prompt_template = """你是一个专业的课程助教。你的核心职责是基于提供的参考资料回答学生问题。
+prompt_template = """你是一个专业的 AI 助手。你的核心职责是基于提供的参考资料回答用户问题。
 
 ### 回答原则：
-1. 严禁编造课程资料中的信息。
+1. 严禁编造知识库中的信息。
 2. 无论问题是否与参考资料相关，你都必须给出有益的回复，但同时必须严格区分并标注信息的来源。
 
 ### 来源标注规范（必须严格执行）：
 - **来自知识库**：陈述参考资料中的内容时，必须在对应句子或段落末尾标注，如 [来源:xx文件xx节]。
-- **超出知识库**：如果问题无法从参考资料中找到答案，你必须先明确声明“该问题未在课程知识库中找到相关资料”，然后可以调用你的通用知识进行补充解答，并在补充内容后标注 [来源:通用知识]。
+- **超出知识库**：如果问题无法从参考资料中找到答案，你必须先明确声明"该问题未在知识库中找到相关资料"，然后可以调用你的通用知识进行补充解答，并在补充内容后标注 [来源:通用知识]。
 - **混合情况**：如果回答中既有参考资料的内容，又有你补充的通用知识，必须分别标注，绝不能混淆。
 
 ### 回答格式要求：
 1. 语言简洁，逻辑清晰，使用列表或分段提升可读性。
-2. 如果问题完全与课程无关，在提供通用解答后，可礼貌提醒该问题偏离了当前课程。
 
 ---
 参考资料：
 {context}
 ---
-学生问题：
+用户问题：
 {question}
 ---
 ### 回答"""
@@ -148,21 +147,20 @@ PROMPT = PromptTemplate(
     input_variables=["context", "question"]
 )
 
-prompt_template_with_history = """你是一个专业的课程助教。你的核心职责是基于提供的参考资料回答学生问题，并结合对话上下文理解意图。
+prompt_template_with_history = """你是一个专业的 AI 助手。你的核心职责是基于提供的参考资料回答用户问题，并结合对话上下文理解意图。
 
 ### 回答原则：
-1. 严禁编造课程资料中的信息。
+1. 严禁编造知识库中的信息。
 2. 无论问题是否与参考资料相关，你都必须给出有益的回复，但同时必须严格区分并标注信息的来源。
 
 ### 来源标注规范（必须严格执行）：
 - **来自知识库**：陈述参考资料中的内容时，必须在对应句子或段落末尾标注，如 [来源:xx文件xx节]。
-- **超出知识库**：如果问题无法从参考资料中找到答案，你必须先明确声明“该问题未在课程知识库中找到相关资料”，然后可以调用你的通用知识进行补充解答，并在补充内容后标注 [来源:通用知识]。
+- **超出知识库**：如果问题无法从参考资料中找到答案，你必须先明确声明"该问题未在知识库中找到相关资料"，然后可以调用你的通用知识进行补充解答，并在补充内容后标注 [来源:通用知识]。
 - **混合情况**：如果回答中既有参考资料的内容，又有你补充的通用知识，必须分别标注，绝不能混淆。
 
 ### 回答格式要求：
 1. 语言简洁，逻辑清晰，使用列表或分段提升可读性。
 2. 结合对话上下文，准确理解代词和省略的指代对象（如"它"、"这个方法"、"请详细解释"等）。
-3. 如果问题完全与课程无关，在提供通用解答后，可礼貌提醒该问题偏离了当前课程。
 
 ---
 参考资料：
@@ -171,7 +169,7 @@ prompt_template_with_history = """你是一个专业的课程助教。你的核�
 历史对话：
 {history}
 ---
-学生问题：
+用户问题：
 {question}
 ---
 ### 回答："""
@@ -191,15 +189,15 @@ retriever = None
 embeddings = None
 llm = None
 
-# 硅基流动配置
-siliconflow_base_url = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
-siliconflow_api_key = os.getenv("SILICONFLOW_API_KEY")
-siliconflow_embedding_model = "BAAI/bge-m3"
+# 嵌入模型配置（OpenAI 兼容 API）
+embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "https://api.siliconflow.cn/v1")
+embedding_api_key = os.getenv("EMBEDDING_API_KEY")
+embedding_model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
-# 百炼平台配置（仅用于LLM）
-bailian_base_url = os.getenv("BAILIAN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-bailian_api_key = os.getenv("BAILIAN_API_KEY")
-bailian_model = "qwen3.5-122b-a10b"
+# LLM 配置（OpenAI 兼容 API）
+llm_base_url = os.getenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+llm_api_key = os.getenv("LLM_API_KEY")
+llm_model = os.getenv("LLM_MODEL", "qwen3.5-122b-a10b")
 
 # 数据库路径
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -212,9 +210,9 @@ DB_PATH = os.path.join(base_dir, "backend", "sessions.db")
 class SiliconFlowEmbeddings(Embeddings):
     """硅基流动嵌入模型，使用BAAI/bge-m3"""
     def __init__(self, api_key=None, base_url=None, model=None):
-        self.api_key = api_key or siliconflow_api_key
-        self.base_url = base_url or siliconflow_base_url
-        self.model = model or siliconflow_embedding_model
+        self.api_key = api_key or embedding_api_key
+        self.base_url = base_url or embedding_base_url
+        self.model = model or embedding_model_name
 
     def _get_embeddings(self, texts_list):
         url = f"{self.base_url}/embeddings"
@@ -399,10 +397,10 @@ def split_documents(documents):
 # ============================================================
 
 def create_vectorstore(texts):
-    global siliconflow_api_key
+    global embedding_api_key
 
-    if not siliconflow_api_key:
-        print("错误：未设置SILICONFLOW_API_KEY环境变量")
+    if not embedding_api_key:
+        print("错误：未设置EMBEDDING_API_KEY环境变量")
         return None
 
     from langchain_core.documents import Document
@@ -474,19 +472,19 @@ def create_vectorstore(texts):
 
 def init_vectorstore(force_rebuild=False):
     global vectorstore, retriever, embeddings, llm
-    global siliconflow_api_key, bailian_api_key, bailian_base_url, bailian_model
+    global embedding_api_key, llm_api_key, llm_base_url, llm_model
     try:
-        if not siliconflow_api_key:
-            print("未设置SILICONFLOW_API_KEY环境变量")
+        if not embedding_api_key:
+            print("未设置EMBEDDING_API_KEY环境变量")
             return False
 
         from langchain_openai import ChatOpenAI
 
         embeddings = SiliconFlowEmbeddings()
         llm = ChatOpenAI(
-            openai_api_key=bailian_api_key,
-            openai_api_base=bailian_base_url,
-            model_name=bailian_model,
+            openai_api_key=llm_api_key,
+            openai_api_base=llm_base_url,
+            model_name=llm_model,
             temperature=0.3,
             request_timeout=120,
             max_retries=2
@@ -509,9 +507,9 @@ def init_vectorstore(force_rebuild=False):
                 if docs:
                     texts = split_documents(docs)
                     vectorstore = create_vectorstore(texts)
-                    print("从课程资料创建了新的向量库")
+                    print("从文档创建了新的向量库")
                 else:
-                    print("未找到课程资料，向量库未初始化")
+                    print("未找到文档，向量库未初始化")
                     return False
             except Exception as e:
                 print(f"创建向量库失败: {e}")
@@ -588,7 +586,7 @@ def generate_summary_task(session_id: str):
 
 @app.get("/")
 async def root():
-    return {"message": "课程助手API已启动（会话记忆版，硅基流动bge-m3嵌入模型），访问 /ask 接口进行问答，/init 接口初始化知识库"}
+    return {"message": "知识库API已启动（会话记忆版，硅基流动bge-m3嵌入模型），访问 /ask 接口进行问答，/init 接口初始化知识库"}
 
 @app.get("/health")
 async def health_check():
@@ -597,9 +595,9 @@ async def health_check():
 @app.post("/init")
 async def init_knowledge_base(force_rebuild: bool = False):
     try:
-        global siliconflow_api_key
-        if not siliconflow_api_key:
-            return {"status": "error", "message": "未设置SILICONFLOW_API_KEY环境变量"}
+        global embedding_api_key
+        if not embedding_api_key:
+            return {"status": "error", "message": "未设置EMBEDDING_API_KEY环境变量"}
 
         success = init_vectorstore(force_rebuild=force_rebuild)
         if success:
@@ -613,14 +611,16 @@ async def init_knowledge_base(force_rebuild: bool = False):
 @app.post("/ask", response_model=Response)
 async def ask_question(query: Query, background_tasks: BackgroundTasks):
     try:
-        global siliconflow_api_key
-        if not siliconflow_api_key:
-            raise HTTPException(status_code=503, detail="未设置SILICONFLOW_API_KEY环境变量")
+        global embedding_api_key, llm_api_key
+        if not llm_api_key:
+            raise HTTPException(status_code=503, detail="未设置LLM_API_KEY环境变量")
+        if not embedding_api_key:
+            raise HTTPException(status_code=503, detail="未设置EMBEDDING_API_KEY环境变量")
 
         if not retriever:
             print("retriever未初始化，尝试初始化...")
             if not init_vectorstore():
-                raise HTTPException(status_code=503, detail="向量库未初始化，请先上传课程资料")
+                raise HTTPException(status_code=503, detail="向量库未初始化，请先上传文档")
 
         session_id = query.session_id
 
@@ -674,19 +674,21 @@ async def ask_question(query: Query, background_tasks: BackgroundTasks):
 @app.get("/v1/models")
 async def list_models():
     return OpenAIModelsResponse(
-        data=[OpenAIModel(id="course-assistant")]
+        data=[OpenAIModel(id="knowledge-base")]
     )
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: OpenAIChatRequest, background_tasks: BackgroundTasks):
     try:
-        global siliconflow_api_key
-        if not siliconflow_api_key:
-            raise HTTPException(status_code=503, detail="未设置SILICONFLOW_API_KEY环境变量")
+        global embedding_api_key, llm_api_key
+        if not llm_api_key:
+            raise HTTPException(status_code=503, detail="未设置LLM_API_KEY环境变量")
+        if not embedding_api_key:
+            raise HTTPException(status_code=503, detail="未设置EMBEDDING_API_KEY环境变量")
 
         if not retriever:
             if not init_vectorstore():
-                raise HTTPException(status_code=503, detail="向量库未初始化，请先上传课程资料")
+                raise HTTPException(status_code=503, detail="向量库未初始化，请先上传文档")
 
         session_id = request.session_id
 
@@ -850,13 +852,13 @@ init_vectorstore()
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("启动课程助手API（会话记忆版）...")
-    print(f"SILICONFLOW_API_KEY: {'已设置' if siliconflow_api_key else '未设置'}")
-    print(f"BAILIAN_API_KEY: {'已设置' if bailian_api_key else '未设置'}")
-    print(f"BAILIAN_BASE_URL: {bailian_base_url}")
-    print(f"BAILIAN_MODEL: {bailian_model}")
-    print(f"SILICONFLOW_BASE_URL: {siliconflow_base_url}")
-    print(f"SILICONFLOW_MODEL: {siliconflow_embedding_model}")
+    print("启动知识库API（会话记忆版）...")
+    print(f"LLM_API_KEY: {'已设置' if llm_api_key else '未设置'}")
+    print(f"LLM_BASE_URL: {llm_base_url}")
+    print(f"LLM_MODEL: {llm_model}")
+    print(f"EMBEDDING_API_KEY: {'已设置' if embedding_api_key else '未设置'}")
+    print(f"EMBEDDING_BASE_URL: {embedding_base_url}")
+    print(f"EMBEDDING_MODEL: {embedding_model_name}")
     print(f"数据库路径: {DB_PATH}")
     print(f"最大历史轮数: {MAX_HISTORY_EXCHANGES}")
     print(f"会话过期天数: {SESSION_MAX_AGE_DAYS}")

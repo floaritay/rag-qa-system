@@ -18,18 +18,21 @@
 ### 1. 准备工作
 
 确保：
-- 已设置 `BAILIAN_API_KEY` 环境变量
+- 已在 `.env` 文件中设置 API 密钥
 - `course_knowledge_base` 目录存在且包含有效向量库
 - 已安装所有依赖（在 `backend/requirements.txt` 中）
 
 ### 2. 设置环境变量
 
-```bash
-# Windows
-set BAILIAN_API_KEY=你的百炼平台API密钥
+在项目根目录创建 `.env` 文件：
 
-# Linux/Mac
-export BAILIAN_API_KEY=你的百炼平台API密钥
+```
+LLM_API_KEY=你的LLM API密钥
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen3.5-122b-a10b
+EMBEDDING_API_KEY=你的嵌入API密钥
+EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-m3
 ```
 
 ### 3. 配置测试用例
@@ -124,7 +127,7 @@ class CustomRAGEvaluator(RAGEvaluator):
 
 ## 注意事项
 
-1. 确保测试用例的关键词与课程资料内容匹配
+1. 确保测试用例的关键词与文档内容匹配
 2. 召回率和精确率基于关键词匹配，更准确的评估需要人工标注
 3. 建议至少准备10-20个测试用例以获得更可靠的统计结果
 4. 评估前确保知识库已正确初始化

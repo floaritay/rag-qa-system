@@ -1,10 +1,10 @@
-# 智能课程助手
+# 个人知识库
 
-基于 RAG（检索增强生成）技术的智能问答系统，帮助学生快速查询课程资料中的内容。
+基于 RAG（检索增强生成）技术的智能问答系统，帮助用户快速查询个人文档中的内容。
 
 ## 项目简介
 
-智能课程助手是一个 AI 驱动的问答系统，能够从课程资料（PDF/PPTX/DOCX/MD）中检索相关信息并生成准确回答。系统采用 FastAPI + LangChain 构建 RAG 服务，支持混合检索、查询优化、重排序等高级功能，同时提供 OpenAI 兼容 API 以接入 Open WebUI 等客户端。
+个人知识库是一个 AI 驱动的问答系统，能够从个人文档（PDF/PPTX/DOCX/MD）中检索相关信息并生成准确回答。系统采用 FastAPI + LangChain 构建 RAG 服务，支持混合检索、查询优化、重排序等高级功能，兼容 OpenAI  API，同时支持接入 Open WebUI 等客户端。
 
 ## 技术栈
 
@@ -14,9 +14,9 @@
 | RAG 框架 | LangChain                |
 | 向量数据库  | FAISS（本地存储）              |
 | 关键词检索  | BM25（rank_bm25）          |
-| 大语言模型  | 阿里云百炼 qwen3.5-122b-a10b |
-| 嵌入模型   | 硅基流动 BAAI/bge-m3        |
-| 重排序模型  | 硅基流动 BAAI/bge-reranker-v2-m3 |
+| LLM     | 任意 OpenAI 兼容 API |
+| 嵌入模型   | 任意 OpenAI 兼容嵌入 API |
+| 重排序模型  | OpenAI 兼容 rerank API（如硅基流动 BAAI/bge-reranker-v2-m3） |
 | 前端界面   | 原生 Web 界面（HTML+CSS+JS） |
 
 ## 项目结构
@@ -34,7 +34,7 @@
 │   ├── app.js                          # 交互逻辑
 │   └── styles.css                      # 样式
 ├── docs/                               # 文档目录
-├── course_materials/                   # 课程资料存放目录（不存在请手动创建）
+├── course_materials/                   # 文档存放目录（不存在请手动创建）
 ├── course_knowledge_base/              # 向量库 + BM25 索引（自动生成）
 ├── start.bat                           # 一键启动脚本
 └── README.md
@@ -45,8 +45,7 @@
 ### 环境要求
 
 - Python 3.10+
-- 阿里云百炼平台 API 密钥（用于大语言模型）
-- 硅基流动 API 密钥（用于大语言模型，嵌入模型和重排序模型）
+- OpenAI 兼容的 API 密钥
 
 ### 安装步骤
 
@@ -63,19 +62,28 @@ cd 你的文件目录
 pip install -r backend/requirements.txt
 ```
 
+运行 `start.bat` 启动服务,会自动打开浏览器访问 `http://localhost:8080`。
+
+可在前端页面完成 `模型配置，知识库管理` 等。或继续以下步骤：
+
 3. **配置环境变量**
 
 在项目根目录创建 `.env` 文件：
 
 ```
-BAILIAN_API_KEY=你的百炼平台API密钥
-SILICONFLOW_API_KEY=你的硅基流动API密钥
+LLM_API_KEY=你的LLM API密钥
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen3.5-122b-a10b
+EMBEDDING_API_KEY=你的嵌入API密钥
+EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-m3
 ```
-或在前端页面设置
 
-4. **准备课程资料**
+系统兼容任意 OpenAI 兼容 API，可通过修改 `LLM_BASE_URL`、`EMBEDDING_BASE_URL` 等变量切换供应商。
 
-将课程资料（PDF/PPTX/DOCX/MD）放入 `course_materials` 文件夹（如不存在请手动创建）。
+4. **准备文档资料**
+
+将文档（PDF/PPTX/DOCX/MD）放入 `course_materials` 文件夹（如不存在请手动创建）。
 
 5. **启动服务**
 
@@ -94,7 +102,7 @@ python -m http.server 8080 --directory web      # 前端 http://localhost:8080
 # 初始化知识库
 curl -X POST http://localhost:8001/init
 
-# 强制重建知识库（课程资料变更后使用）
+# 强制重建知识库（文档变更后使用）
 curl -X POST "http://localhost:8001/init?force_rebuild=true"
 ```
 
@@ -102,11 +110,12 @@ curl -X POST "http://localhost:8001/init?force_rebuild=true"
 
 ## 功能特性
 
+- **流式输出**：回答逐 token 实时推送，支持 `/ask/stream`（SSE）和 `/v1/chat/completions`（OpenAI 格式）
 - **混合检索**：向量语义检索（FAISS）+ 关键词检索（BM25），通过 RRF 融合排序
 - **查询优化**：查询改写（将口语化问题转为标准检索词）和 HyDE（生成假设答案后检索）
-- **重排序**：使用硅基流动 reranker 模型对检索结果二次排序，提升相关性
+- **重排序**：使用 Cohere 兼容 reranker 模型对检索结果二次排序，提升相关性（可选）
 - **会话记忆**：基于 SQLite 的多轮对话管理，自动摘要历史消息
-- **多格式支持**：支持 PDF、PPTX、DOCX、Markdown 格式的课程资料
+- **多格式支持**：支持 PDF、PPTX、DOCX、Markdown 格式的文档
 - **知识库管理**：支持文件上传、删除、知识库初始化和重建
 - **OpenAI 兼容 API**：支持 Open WebUI 等客户端接入
 - **RAG 评估**：提供评估脚本，计算精确率、召回率等指标
@@ -130,7 +139,7 @@ curl -X POST "http://localhost:8001/init?force_rebuild=true"
 上下文组装 → LLM 生成 → 返回答案（含来源引用）
 ```
 
-**文档入库流程**：课程资料 → 文本分割（chunk_size=500, overlap=50）→ 嵌入向量化 → 存入 FAISS + BM25 索引
+**文档入库流程**：文档 → 文本分割（chunk_size=500, overlap=50）→ 嵌入向量化 → 存入 FAISS + BM25 索引
 
 ## API 接口
 
@@ -156,9 +165,9 @@ curl -X POST "http://localhost:8001/init?force_rebuild=true"
 
 | 接口                     | 方法   | 说明              |
 | ---------------------- | ---- | --------------- |
-| `/materials`           | GET  | 列出所有课程资料文件   |
-| `/materials/upload`    | POST | 上传课程资料文件      |
-| `/materials/{filename}` | DELETE | 删除指定课程资料文件 |
+| `/materials`           | GET  | 列出所有文档文件   |
+| `/materials/upload`    | POST | 上传文档文件      |
+| `/materials/{filename}` | DELETE | 删除指定文档文件 |
 
 ### 配置与兼容
 
@@ -188,7 +197,7 @@ python backend/evaluate.py
 ## 常见问题
 
 **需要重建知识库的情况：**
-- 新增/删除/修改了课程资料文件
+- 新增/删除/修改了文档文件
 - 更换了嵌入模型
 - 修改了文本分割参数（chunk_size, chunk_overlap）
 
@@ -204,6 +213,7 @@ python backend/evaluate.py
 - [评估指南](./docs/EVALUATION_GUIDE.md)
 - [RAG 优化指南](./docs/RAG_OPTIMIZATION_GUIDE.md)
 - [会话记忆指南](./docs/SESSION_MEMORY_GUIDE.md)
+- [流式输出指南](./docs/STREAMING_GUIDE.md)
 - [来源显示指南](./docs/SOURCES_DISPLAY_GUIDE.md)
 - [问题解决记录](./docs/solve.txt)
 

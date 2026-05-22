@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -8,6 +9,7 @@ import time
 import asyncio
 import sqlite3
 import pickle
+import json
 import re
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
@@ -25,7 +27,7 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
-app = FastAPI(title="课程助手API（检索优化版）")
+app = FastAPI(title="知识库API（检索优化版）")
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,7 +71,7 @@ class OpenAIModel(BaseModel):
     id: str
     object: str = "model"
     created: int = Field(default_factory=lambda: int(time.time()))
-    owned_by: str = "course-assistant"
+    owned_by: str = "knowledge-base"
 
 class OpenAIModelsResponse(BaseModel):
     object: str = "list"
@@ -80,7 +82,7 @@ class OpenAIMessage(BaseModel):
     content: str
 
 class OpenAIChatRequest(BaseModel):
-    model: str = "course-assistant"
+    model: str = "knowledge-base"
     messages: List[OpenAIMessage]
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = None
@@ -104,7 +106,7 @@ class OpenAIChatResponse(BaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{uuid.uuid4().hex[:24]}")
     object: str = "chat.completion"
     created: int = Field(default_factory=lambda: int(time.time()))
-    model: str = "course-assistant"
+    model: str = "knowledge-base"
     choices: List[OpenAIChatChoice]
     usage: OpenAIUsage = OpenAIUsage()
 
@@ -136,26 +138,25 @@ class SessionHistoryResponse(BaseModel):
 # Prompt 模板
 # ============================================================
 
-prompt_template = """你是一个专业的课程助教。你的核心职责是基于提供的参考资料回答学生问题。
+prompt_template = """你是一个专业的 AI 助手。你的核心职责是基于提供的参考资料回答用户问题。
 
 ### 回答原则：
-1. 严禁编造课程资料中的信息。
+1. 严禁编造知识库中的信息。
 2. 无论问题是否与参考资料相关，你都必须给出有益的回复，但同时必须严格区分并标注信息的来源。
 
 ### 来源标注规范（必须严格执行）：
 - **来自知识库**：陈述参考资料中的内容时，必须在对应句子或段落末尾标注，如 [来源:xx文件xx节]。
-- **超出知识库**：如果问题无法从参考资料中找到答案，你必须先明确声明"该问题未在课程知识库中找到相关资料"，然后可以调用你的通用知识进行补充解答，并在补充内容后标注 [来源:通用知识]。
+- **超出知识库**：如果问题无法从参考资料中找到答案，你必须先明确声明"该问题未在知识库中找到相关资料"，然后可以调用你的通用知识进行补充解答，并在补充内容后标注 [来源:通用知识]。
 - **混合情况**：如果回答中既有参考资料的内容，又有你补充的通用知识，必须分别标注，绝不能混淆。
 
 ### 回答格式要求：
 1. 语言简洁，逻辑清晰，使用列表或分段提升可读性。
-2. 如果问题完全与课程无关，在提供通用解答后，可礼貌提醒该问题偏离了当前课程。
 
 ---
 参考资料：
 {context}
 ---
-学生问题：
+用户问题：
 {question}
 ---
 ### 回答"""
@@ -165,21 +166,20 @@ PROMPT = PromptTemplate(
     input_variables=["context", "question"]
 )
 
-prompt_template_with_history = """你是一个专业的课程助教。你的核心职责是基于提供的参考资料回答学生问题，并结合对话上下文理解意图。
+prompt_template_with_history = """你是一个专业的 AI 助手。你的核心职责是基于提供的参考资料回答用户问题，并结合对话上下文理解意图。
 
 ### 回答原则：
-1. 严禁编造课程资料中的信息。
+1. 严禁编造知识库中的信息。
 2. 无论问题是否与参考资料相关，你都必须给出有益的回复，但同时必须严格区分并标注信息的来源。
 
 ### 来源标注规范（必须严格执行）：
 - **来自知识库**：陈述参考资料中的内容时，必须在对应句子或段落末尾标注，如 [来源:xx文件xx节]。
-- **超出知识库**：如果问题无法从参考资料中找到答案，你必须先明确声明"该问题未在课程知识库中找到相关资料"，然后可以调用你的通用知识进行补充解答，并在补充内容后标注 [来源:通用知识]。
+- **超出知识库**：如果问题无法从参考资料中找到答案，你必须先明确声明"该问题未在知识库中找到相关资料"，然后可以调用你的通用知识进行补充解答，并在补充内容后标注 [来源:通用知识]。
 - **混合情况**：如果回答中既有参考资料的内容，又有你补充的通用知识，必须分别标注，绝不能混淆。
 
 ### 回答格式要求：
 1. 语言简洁，逻辑清晰，使用列表或分段提升可读性。
 2. 结合对话上下文，准确理解代词和省略的指代对象（如"它"、"这个方法"、"请详细解释"等）。
-3. 如果问题完全与课程无关，在提供通用解答后，可礼貌提醒该问题偏离了当前课程。
 
 ---
 参考资料：
@@ -188,7 +188,7 @@ prompt_template_with_history = """你是一个专业的课程助教。你的核�
 历史对话：
 {history}
 ---
-学生问题：
+用户问题：
 {question}
 ---
 ### 回答："""
@@ -215,7 +215,7 @@ QUERY_REWRITE_PROMPT = """你是一个检索优化助手。请将以下用户问
 改写后的查询词："""
 
 HYDE_PROMPT = """请根据以下问题，写一段简短的假设性答案（约100字）。
-这段答案不需要准确，只需包含可能出现在课程资料中的专业术语和表述方式。
+这段答案不需要准确，只需包含可能出现在文档中的专业术语和表述方式。
 
 问题：{question}
 
@@ -234,30 +234,34 @@ reranker = None
 bm25_index = None
 bm25_docs = None
 
-# 硅基流动配置
-siliconflow_base_url = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
-siliconflow_api_key = os.getenv("SILICONFLOW_API_KEY")
-siliconflow_embedding_model = os.getenv("SILICONFLOW_EMBEDDING_MODEL", "BAAI/bge-m3")
+# 嵌入模型配置（OpenAI 兼容 API）
+embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "https://api.siliconflow.cn/v1")
+embedding_api_key = os.getenv("EMBEDDING_API_KEY")
+embedding_model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
-# 百炼平台配置（仅用于LLM）
-bailian_base_url = os.getenv("BAILIAN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-bailian_api_key = os.getenv("BAILIAN_API_KEY")
-bailian_model = os.getenv("BAILIAN_MODEL", "qwen3.5-122b-a10b")
+# 重排序模型配置（OpenAI 兼容 API，默认使用嵌入模型的 API）
+reranker_base_url = os.getenv("RERANKER_BASE_URL") or embedding_base_url
+reranker_api_key = os.getenv("RERANKER_API_KEY") or embedding_api_key
+
+# LLM 配置（OpenAI 兼容 API）
+llm_base_url = os.getenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+llm_api_key = os.getenv("LLM_API_KEY")
+llm_model = os.getenv("LLM_MODEL", "qwen3.5-122b-a10b")
 
 # 数据库路径
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(base_dir, "backend", "sessions.db")
 
 # ============================================================
-# SiliconFlowEmbeddings 类
+# OpenAICompatibleEmbeddings 类
 # ============================================================
 
-class SiliconFlowEmbeddings(Embeddings):
-    """硅基流动嵌入模型，使用BAAI/bge-m3"""
+class OpenAICompatibleEmbeddings(Embeddings):
+    """OpenAI 兼容嵌入模型（默认硅基流动 BAAI/bge-m3）"""
     def __init__(self, api_key=None, base_url=None, model=None):
-        self.api_key = api_key or siliconflow_api_key
-        self.base_url = base_url or siliconflow_base_url
-        self.model = model or siliconflow_embedding_model
+        self.api_key = api_key or embedding_api_key
+        self.base_url = base_url or embedding_base_url
+        self.model = model or embedding_model_name
 
     def _get_embeddings(self, texts_list):
         url = f"{self.base_url}/embeddings"
@@ -277,7 +281,7 @@ class SiliconFlowEmbeddings(Embeddings):
             embeddings = [item['embedding'] for item in result['data']]
             return embeddings
         except Exception as e:
-            print(f"调用硅基流动Embedding API失败: {e}")
+            print(f"调用嵌入模型API失败: {e}")
             print(f"响应内容: {response.text if 'response' in locals() else '无响应'}")
             return None
 
@@ -290,14 +294,14 @@ class SiliconFlowEmbeddings(Embeddings):
         return result[0] if result else []
 
 # ============================================================
-# SiliconFlowReranker 类（后检索优化）
+# OpenAICompatibleReranker 类（后检索优化）
 # ============================================================
 
-class SiliconFlowReranker:
-    """硅基流动重排序模型，使用BAAI/bge-reranker-v2-m3"""
+class OpenAICompatibleReranker:
+    """OpenAI 兼容重排序模型（默认硅基流动 BAAI/bge-reranker-v2-m3）"""
     def __init__(self, api_key=None, base_url=None, model=None, top_n=DEFAULT_TOP_K):
-        self.api_key = api_key or siliconflow_api_key
-        self.base_url = base_url or siliconflow_base_url
+        self.api_key = api_key or reranker_api_key
+        self.base_url = base_url or reranker_base_url
         self.model = model or RERANKER_MODEL
         self.top_n = top_n
 
@@ -587,10 +591,10 @@ def split_documents(documents):
 # ============================================================
 
 def create_vectorstore(texts):
-    global siliconflow_api_key
+    global embedding_api_key
 
-    if not siliconflow_api_key:
-        print("错误：未设置SILICONFLOW_API_KEY环境变量")
+    if not embedding_api_key:
+        print("错误：未设置EMBEDDING_API_KEY环境变量")
         return None
 
     from langchain_core.documents import Document
@@ -629,7 +633,7 @@ def create_vectorstore(texts):
 
     print(f"清理后文本块数量: {len(texts)}")
 
-    emb = SiliconFlowEmbeddings()
+    emb = OpenAICompatibleEmbeddings()
     batch_size = 32
     vs = None
 
@@ -673,30 +677,30 @@ def create_vectorstore(texts):
 def init_vectorstore(force_rebuild=False):
     global vectorstore, retriever, embeddings, llm, reranker
     global bm25_index, bm25_docs
-    global siliconflow_api_key, bailian_api_key, bailian_base_url, bailian_model
+    global embedding_api_key, llm_api_key, llm_base_url, llm_model
     try:
-        if not siliconflow_api_key:
-            print("未设置SILICONFLOW_API_KEY环境变量")
+        if not embedding_api_key:
+            print("未设置EMBEDDING_API_KEY环境变量")
             return False
 
-        if not bailian_api_key:
-            print("未设置BAILIAN_API_KEY环境变量")
+        if not llm_api_key:
+            print("未设置LLM_API_KEY环境变量")
             return False
 
         from langchain_openai import ChatOpenAI
 
-        embeddings = SiliconFlowEmbeddings()
+        embeddings = OpenAICompatibleEmbeddings()
         llm = ChatOpenAI(
-            openai_api_key=bailian_api_key,
-            openai_api_base=bailian_base_url,
-            model_name=bailian_model,
+            openai_api_key=llm_api_key,
+            openai_api_base=llm_base_url,
+            model_name=llm_model,
             temperature=0.3,
             request_timeout=120,
             max_retries=2
         )
 
         # 初始化重排序器
-        reranker = SiliconFlowReranker()
+        reranker = OpenAICompatibleReranker()
         print(f"重排序器已初始化 (模型: {RERANKER_MODEL})")
 
         kb_path = os.path.join(base_dir, "course_knowledge_base")
@@ -734,9 +738,9 @@ def init_vectorstore(force_rebuild=False):
                             bm25_data = pickle.load(f)
                         bm25_index = BM25Okapi(bm25_data["tokenized_corpus"])
                         bm25_docs = bm25_data["documents"]
-                    print("从课程资料创建了新的向量库和 BM25 索引")
+                    print("从文档创建了新的向量库和 BM25 索引")
                 else:
-                    print("未找到课程资料，向量库未初始化")
+                    print("未找到文档，向量库未初始化")
                     return False
             except Exception as e:
                 print(f"创建向量库失败: {e}")
@@ -962,6 +966,72 @@ def rag_query_stateless(question: str,
     answer_text = answer.content if hasattr(answer, 'content') else str(answer)
     return answer_text, sources
 
+def _retrieve_and_build_prompt(question, session_id=None, retrieval_strategy="default",
+                               pre_retrieval="none", post_retrieval="none", use_history=True):
+    """公共检索逻辑，返回 (prompt_text, sources)"""
+    search_query = question
+    if pre_retrieval == "rewrite":
+        search_query = rewrite_query(question, session_id) if session_id else rewrite_query(question)
+    elif pre_retrieval == "hyde":
+        search_query = hyde_generate(question)
+
+    if pre_retrieval == "hyde":
+        hyde_embedding = embeddings.embed_query(search_query)
+        scored = vectorstore.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
+        docs = []
+        for doc, score in scored:
+            if hasattr(doc, 'metadata'):
+                doc.metadata['vector_score'] = round(float(score), 4)
+            docs.append(doc)
+    elif retrieval_strategy == "hybrid":
+        docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K)
+    else:
+        scored = vectorstore.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
+        docs = []
+        for doc, score in scored:
+            if hasattr(doc, 'metadata'):
+                doc.metadata['vector_score'] = round(float(score), 4)
+            docs.append(doc)
+
+    if post_retrieval == "rerank" and reranker:
+        docs = reranker.rerank(question, docs, top_n=DEFAULT_TOP_K)
+
+    top_docs = docs[:DEFAULT_TOP_K]
+    context = "\n\n".join([doc.page_content for doc in top_docs])
+    sources = extract_sources(docs)
+
+    if use_history and session_id:
+        history_text = format_history(session_id)
+        prompt_text = PROMPT_WITH_HISTORY.format(context=context, history=history_text, question=question)
+    else:
+        prompt_text = PROMPT.format(context=context, question=question)
+
+    return prompt_text, sources
+
+def rag_query_stream(question, session_id=None, retrieval_strategy="default",
+                     pre_retrieval="none", post_retrieval="none"):
+    """流式 RAG 查询（同步生成器）：先 yield sources JSON，再逐 token yield"""
+    prompt_text, sources = _retrieve_and_build_prompt(
+        question, session_id, retrieval_strategy, pre_retrieval, post_retrieval, use_history=True
+    )
+    yield json.dumps({"type": "sources", "data": sources}, ensure_ascii=False)
+    for chunk in llm.stream(prompt_text):
+        content = chunk.content if hasattr(chunk, 'content') else str(chunk)
+        if content:
+            yield json.dumps({"type": "token", "data": content}, ensure_ascii=False)
+
+def rag_query_stateless_stream(question, retrieval_strategy="default",
+                               pre_retrieval="none", post_retrieval="none"):
+    """无状态流式 RAG 查询（同步生成器）"""
+    prompt_text, sources = _retrieve_and_build_prompt(
+        question, None, retrieval_strategy, pre_retrieval, post_retrieval, use_history=False
+    )
+    yield json.dumps({"type": "sources", "data": sources}, ensure_ascii=False)
+    for chunk in llm.stream(prompt_text):
+        content = chunk.content if hasattr(chunk, 'content') else str(chunk)
+        if content:
+            yield json.dumps({"type": "token", "data": content}, ensure_ascii=False)
+
 def generate_summary_task(session_id: str):
     """后台任务：生成会话摘要"""
     try:
@@ -986,7 +1056,7 @@ def generate_summary_task(session_id: str):
 
 @app.get("/")
 async def root():
-    return {"message": "课程助手API已启动（检索优化版），支持查询改写/HyDE/混合检索/重排序"}
+    return {"message": "知识库API已启动（检索优化版），支持查询改写/HyDE/混合检索/重排序"}
 
 @app.get("/health")
 async def health_check():
@@ -1004,13 +1074,15 @@ def save_env_file():
     """Save current config to .env file, preserving comments and formatting"""
     env_path = os.path.join(base_dir, ".env")
     updates = {
-        "BAILIAN_API_KEY": bailian_api_key or "",
-        "BAILIAN_BASE_URL": bailian_base_url,
-        "BAILIAN_MODEL": bailian_model,
-        "SILICONFLOW_API_KEY": siliconflow_api_key or "",
-        "SILICONFLOW_BASE_URL": siliconflow_base_url,
-        "SILICONFLOW_EMBEDDING_MODEL": siliconflow_embedding_model,
+        "LLM_API_KEY": llm_api_key or "",
+        "LLM_BASE_URL": llm_base_url,
+        "LLM_MODEL": llm_model,
+        "EMBEDDING_API_KEY": embedding_api_key or "",
+        "EMBEDDING_BASE_URL": embedding_base_url,
+        "EMBEDDING_MODEL": embedding_model_name,
         "RERANKER_MODEL": RERANKER_MODEL,
+        "RERANKER_API_KEY": reranker_api_key or "",
+        "RERANKER_BASE_URL": reranker_base_url,
     }
     updated_keys = set()
 
@@ -1040,26 +1112,29 @@ def save_env_file():
 async def get_config():
     return {
         "llm": {
-            "model": bailian_model,
-            "base_url": bailian_base_url,
-            "api_key": mask_key(bailian_api_key),
+            "model": llm_model,
+            "base_url": llm_base_url,
+            "api_key": mask_key(llm_api_key),
         },
         "embedding": {
-            "model": siliconflow_embedding_model,
-            "base_url": siliconflow_base_url,
-            "api_key": mask_key(siliconflow_api_key),
+            "model": embedding_model_name,
+            "base_url": embedding_base_url,
+            "api_key": mask_key(embedding_api_key),
         },
         "reranker": {
             "model": RERANKER_MODEL,
+            "base_url": reranker_base_url,
+            "api_key": mask_key(reranker_api_key),
         },
     }
 
 
 @app.post("/config")
 async def update_config(request: dict):
-    global bailian_model, bailian_base_url, bailian_api_key
-    global siliconflow_base_url, siliconflow_api_key, siliconflow_embedding_model
+    global llm_model, llm_base_url, llm_api_key
+    global embedding_base_url, embedding_api_key, embedding_model_name
     global llm, embeddings, reranker, RERANKER_MODEL
+    global reranker_base_url, reranker_api_key
 
     llm_cfg = request.get("llm", {})
     emb_cfg = request.get("embedding", {})
@@ -1067,32 +1142,36 @@ async def update_config(request: dict):
 
     # Update LLM config
     if "model" in llm_cfg and llm_cfg["model"]:
-        bailian_model = llm_cfg["model"]
+        llm_model = llm_cfg["model"]
     if "base_url" in llm_cfg and llm_cfg["base_url"]:
-        bailian_base_url = llm_cfg["base_url"]
+        llm_base_url = llm_cfg["base_url"]
     if "api_key" in llm_cfg and llm_cfg["api_key"] and not llm_cfg["api_key"].startswith("***"):
-        bailian_api_key = llm_cfg["api_key"]
+        llm_api_key = llm_cfg["api_key"]
 
     # Update embedding config
     if "base_url" in emb_cfg and emb_cfg["base_url"]:
-        siliconflow_base_url = emb_cfg["base_url"]
+        embedding_base_url = emb_cfg["base_url"]
     if "api_key" in emb_cfg and emb_cfg["api_key"] and not emb_cfg["api_key"].startswith("***"):
-        siliconflow_api_key = emb_cfg["api_key"]
+        embedding_api_key = emb_cfg["api_key"]
     if "model" in emb_cfg and emb_cfg["model"]:
-        siliconflow_embedding_model = emb_cfg["model"]
+        embedding_model_name = emb_cfg["model"]
 
-    # Update reranker model
+    # Update reranker config
     if "model" in rer_cfg and rer_cfg["model"]:
         RERANKER_MODEL = rer_cfg["model"]
+    if "base_url" in rer_cfg and rer_cfg["base_url"]:
+        reranker_base_url = rer_cfg["base_url"]
+    if "api_key" in rer_cfg and rer_cfg["api_key"] and not rer_cfg["api_key"].startswith("***"):
+        reranker_api_key = rer_cfg["api_key"]
 
     # Reinitialize components
     errors = []
     try:
         from langchain_openai import ChatOpenAI
         llm = ChatOpenAI(
-            openai_api_key=bailian_api_key,
-            openai_api_base=bailian_base_url,
-            model_name=bailian_model,
+            openai_api_key=llm_api_key,
+            openai_api_base=llm_base_url,
+            model_name=llm_model,
             temperature=0.3,
             request_timeout=120,
             max_retries=2,
@@ -1101,12 +1180,12 @@ async def update_config(request: dict):
         errors.append(f"LLM 初始化失败: {e}")
 
     try:
-        embeddings = SiliconFlowEmbeddings()
+        embeddings = OpenAICompatibleEmbeddings()
     except Exception as e:
         errors.append(f"Embedding 初始化失败: {e}")
 
     try:
-        reranker = SiliconFlowReranker(model=RERANKER_MODEL)
+        reranker = OpenAICompatibleReranker(model=RERANKER_MODEL)
     except Exception as e:
         errors.append(f"Reranker 初始化失败: {e}")
 
@@ -1124,9 +1203,9 @@ async def update_config(request: dict):
 @app.post("/init")
 async def init_knowledge_base(force_rebuild: bool = False):
     try:
-        global siliconflow_api_key
-        if not siliconflow_api_key:
-            return {"status": "error", "message": "未设置SILICONFLOW_API_KEY环境变量"}
+        global embedding_api_key
+        if not embedding_api_key:
+            return {"status": "error", "message": "未设置EMBEDDING_API_KEY环境变量"}
 
         success = init_vectorstore(force_rebuild=force_rebuild)
         if success:
@@ -1141,7 +1220,7 @@ SUPPORTED_EXTENSIONS = {".pdf", ".pptx", ".docx", ".md"}
 
 @app.get("/materials")
 async def list_materials():
-    """列出 course_materials 目录中的课程资料文件。"""
+    """列出 course_materials 目录中的文档文件。"""
     try:
         materials_path = os.path.join(base_dir, "course_materials")
         if not os.path.isdir(materials_path):
@@ -1167,7 +1246,7 @@ async def list_materials():
 
 @app.post("/materials/upload")
 async def upload_material(files: List[UploadFile] = File(...)):
-    """上传课程资料到 course_materials 目录。"""
+    """上传文档到 course_materials 目录。"""
     try:
         materials_path = os.path.join(base_dir, "course_materials")
         os.makedirs(materials_path, exist_ok=True)
@@ -1219,17 +1298,80 @@ async def delete_material(filename: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/ask/stream")
+async def ask_stream(query: Query, background_tasks: BackgroundTasks):
+    """流式问答接口，返回 SSE 事件流"""
+    global embedding_api_key, llm_api_key
+    if not llm_api_key:
+        raise HTTPException(status_code=503, detail="未设置LLM_API_KEY环境变量")
+    if not embedding_api_key:
+        raise HTTPException(status_code=503, detail="未设置EMBEDDING_API_KEY环境变量")
+
+    if not retriever:
+        if not init_vectorstore():
+            raise HTTPException(status_code=503, detail="向量库未初始化，请先上传文档")
+
+    session_id = query.session_id
+    if session_id:
+        session = get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="会话不存在")
+
+    def event_generator():
+        full_answer = []
+        try:
+            gen = rag_query_stream if session_id else rag_query_stateless_stream
+            kwargs = {
+                "question": query.question,
+                "retrieval_strategy": query.retrieval_strategy,
+                "pre_retrieval": query.pre_retrieval,
+                "post_retrieval": query.post_retrieval,
+            }
+            if session_id:
+                kwargs["session_id"] = session_id
+
+            for event_str in gen(**kwargs):
+                event = json.loads(event_str)
+                if event["type"] == "token":
+                    full_answer.append(event["data"])
+                yield f"data: {event_str}\n\n"
+
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'data': str(e)}, ensure_ascii=False)}\n\n"
+
+        # 流式完成后保存消息
+        answer_text = "".join(full_answer)
+        if session_id and answer_text:
+            add_message(session_id, "user", query.question)
+            add_message(session_id, "assistant", answer_text)
+            msg_count = get_message_count(session_id)
+            if msg_count == 2:
+                title = query.question[:30] + ("..." if len(query.question) > 30 else "")
+                update_session_title(session_id, title)
+            if msg_count > 0 and msg_count % SUMMARY_TRIGGER_COUNT == 0:
+                background_tasks.add_task(generate_summary_task, session_id)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/ask", response_model=Response)
 async def ask_question(query: Query, background_tasks: BackgroundTasks):
     try:
-        global siliconflow_api_key
-        if not siliconflow_api_key:
-            raise HTTPException(status_code=503, detail="未设置SILICONFLOW_API_KEY环境变量")
+        global embedding_api_key, llm_api_key
+        if not llm_api_key:
+            raise HTTPException(status_code=503, detail="未设置LLM_API_KEY环境变量")
+        if not embedding_api_key:
+            raise HTTPException(status_code=503, detail="未设置EMBEDDING_API_KEY环境变量")
 
         if not retriever:
             print("retriever未初始化，尝试初始化...")
             if not init_vectorstore():
-                raise HTTPException(status_code=503, detail="向量库未初始化，请先上传课程资料")
+                raise HTTPException(status_code=503, detail="向量库未初始化，请先上传文档")
 
         session_id = query.session_id
         if session_id:
@@ -1284,116 +1426,176 @@ async def ask_question(query: Query, background_tasks: BackgroundTasks):
 @app.get("/v1/models")
 async def list_models():
     return OpenAIModelsResponse(
-        data=[OpenAIModel(id="course-assistant")]
+        data=[OpenAIModel(id="knowledge-base")]
     )
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: OpenAIChatRequest, background_tasks: BackgroundTasks):
+    global embedding_api_key, llm_api_key
+    if not llm_api_key:
+        raise HTTPException(status_code=503, detail="未设置LLM_API_KEY环境变量")
+    if not embedding_api_key:
+        raise HTTPException(status_code=503, detail="未设置EMBEDDING_API_KEY环境变量")
+
+    if not retriever:
+        if not init_vectorstore():
+            raise HTTPException(status_code=503, detail="向量库未初始化，请先上传文档")
+
+    session_id = request.session_id
+
+    user_message = ""
+    for msg in reversed(request.messages):
+        if msg.role == "user":
+            user_message = msg.content
+            break
+
+    if not user_message:
+        raise HTTPException(status_code=400, detail="No user message found")
+
+    if session_id:
+        session = get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="会话不存在")
+
+    print(f"[chat] 收到问题: {user_message} (session_id={session_id}, stream={request.stream})")
+
+    # 流式输出
+    if request.stream:
+        import time as _time
+        chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+
+        def openai_stream_generator():
+            full_answer = []
+            try:
+                gen = rag_query_stream if session_id else rag_query_stateless_stream
+                kwargs = {
+                    "question": user_message,
+                    "retrieval_strategy": request.retrieval_strategy,
+                    "pre_retrieval": request.pre_retrieval,
+                    "post_retrieval": request.post_retrieval,
+                }
+                if session_id:
+                    kwargs["session_id"] = session_id
+
+                for event_str in gen(**kwargs):
+                    event = json.loads(event_str)
+                    if event["type"] == "token":
+                        full_answer.append(event["data"])
+                        chunk = {
+                            "id": chat_id,
+                            "object": "chat.completion.chunk",
+                            "created": int(_time.time()),
+                            "model": request.model,
+                            "choices": [{"index": 0, "delta": {"content": event["data"]}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+                # 结束 chunk
+                chunk = {
+                    "id": chat_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(_time.time()),
+                    "model": request.model,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+            except Exception as e:
+                error_chunk = {"error": {"message": str(e), "type": "server_error"}}
+                yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+
+            # 保存消息
+            answer_text = "".join(full_answer)
+            if session_id and answer_text:
+                add_message(session_id, "user", user_message)
+                add_message(session_id, "assistant", answer_text)
+                msg_count = get_message_count(session_id)
+                if msg_count == 2:
+                    title = user_message[:30] + ("..." if len(user_message) > 30 else "")
+                    update_session_title(session_id, title)
+                if msg_count > 0 and msg_count % SUMMARY_TRIGGER_COUNT == 0:
+                    background_tasks.add_task(generate_summary_task, session_id)
+
+        return StreamingResponse(
+            openai_stream_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # 非流式输出
     try:
-        global siliconflow_api_key
-        if not siliconflow_api_key:
-            raise HTTPException(status_code=503, detail="未设置SILICONFLOW_API_KEY环境变量")
-
-        if not retriever:
-            if not init_vectorstore():
-                raise HTTPException(status_code=503, detail="向量库未初始化，请先上传课程资料")
-
-        session_id = request.session_id
-
-        user_message = ""
-        for msg in reversed(request.messages):
-            if msg.role == "user":
-                user_message = msg.content
-                break
-
-        if not user_message:
-            raise HTTPException(status_code=400, detail="No user message found")
-
         if session_id:
-            session = get_session(session_id)
-            if not session:
-                raise HTTPException(status_code=404, detail="会话不存在")
+            answer, _sources = await asyncio.wait_for(
+                asyncio.to_thread(
+                    rag_query, user_message, session_id,
+                    request.retrieval_strategy, request.pre_retrieval, request.post_retrieval
+                ),
+                timeout=180
+            )
+        else:
+            if len(request.messages) > 1:
+                history_lines = []
+                for msg in request.messages[:-1]:
+                    role_label = "用户" if msg.role == "user" else "助手"
+                    history_lines.append(f"{role_label}：{msg.content}")
+                history_text = "### 对话历史：\n" + "\n\n".join(history_lines) + "\n\n"
 
-        print(f"[chat] 收到问题: {user_message} (session_id={session_id})")
+                search_query = user_message
+                if request.pre_retrieval == "rewrite":
+                    search_query = rewrite_query(user_message)
+                elif request.pre_retrieval == "hyde":
+                    search_query = hyde_generate(user_message)
 
-        try:
-            if session_id:
+                if request.pre_retrieval == "hyde":
+                    hyde_embedding = embeddings.embed_query(search_query)
+                    docs = vectorstore.similarity_search_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
+                elif request.retrieval_strategy == "hybrid":
+                    docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K)
+                else:
+                    docs = retriever.invoke(search_query)
+
+                if request.post_retrieval == "rerank" and reranker:
+                    docs = reranker.rerank(user_message, docs, top_n=DEFAULT_TOP_K)
+
+                context = "\n\n".join([doc.page_content for doc in docs[:DEFAULT_TOP_K]])
+                prompt_text = PROMPT_WITH_HISTORY.format(
+                    context=context, history=history_text, question=user_message
+                )
+                answer_obj = await asyncio.wait_for(
+                    asyncio.to_thread(llm.invoke, prompt_text),
+                    timeout=180
+                )
+                answer = answer_obj.content if hasattr(answer_obj, 'content') else str(answer_obj)
+            else:
                 answer, _sources = await asyncio.wait_for(
                     asyncio.to_thread(
-                        rag_query, user_message, session_id,
+                        rag_query_stateless, user_message,
                         request.retrieval_strategy, request.pre_retrieval, request.post_retrieval
                     ),
                     timeout=180
                 )
-            else:
-                if len(request.messages) > 1:
-                    history_lines = []
-                    for msg in request.messages[:-1]:
-                        role_label = "用户" if msg.role == "user" else "助手"
-                        history_lines.append(f"{role_label}：{msg.content}")
-                    history_text = "### 对话历史：\n" + "\n\n".join(history_lines) + "\n\n"
+    except asyncio.TimeoutError:
+        print("[chat] LLM调用超时(180秒)")
+        raise HTTPException(status_code=504, detail="LLM调用超时，请检查模型配置或网络连接")
 
-                    # 使用指定的检索策略
-                    search_query = user_message
-                    if request.pre_retrieval == "rewrite":
-                        search_query = rewrite_query(user_message)
-                    elif request.pre_retrieval == "hyde":
-                        search_query = hyde_generate(user_message)
+    if session_id:
+        add_message(session_id, "user", user_message)
+        add_message(session_id, "assistant", answer)
+        msg_count = get_message_count(session_id)
+        if msg_count == 2:
+            title = user_message[:30] + ("..." if len(user_message) > 30 else "")
+            update_session_title(session_id, title)
+        if msg_count > 0 and msg_count % SUMMARY_TRIGGER_COUNT == 0:
+            background_tasks.add_task(generate_summary_task, session_id)
 
-                    if request.pre_retrieval == "hyde":
-                        hyde_embedding = embeddings.embed_query(search_query)
-                        docs = vectorstore.similarity_search_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
-                    elif request.retrieval_strategy == "hybrid":
-                        docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K)
-                    else:
-                        docs = retriever.invoke(search_query)
-
-                    if request.post_retrieval == "rerank" and reranker:
-                        docs = reranker.rerank(user_message, docs, top_n=DEFAULT_TOP_K)
-
-                    context = "\n\n".join([doc.page_content for doc in docs[:DEFAULT_TOP_K]])
-                    prompt_text = PROMPT_WITH_HISTORY.format(
-                        context=context, history=history_text, question=user_message
-                    )
-                    answer_obj = await asyncio.wait_for(
-                        asyncio.to_thread(llm.invoke, prompt_text),
-                        timeout=180
-                    )
-                    answer = answer_obj.content if hasattr(answer_obj, 'content') else str(answer_obj)
-                else:
-                    answer, _sources = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            rag_query_stateless, user_message,
-                            request.retrieval_strategy, request.pre_retrieval, request.post_retrieval
-                        ),
-                        timeout=180
-                    )
-        except asyncio.TimeoutError:
-            print("[chat] LLM调用超时(180秒)")
-            raise HTTPException(status_code=504, detail="LLM调用超时，请检查模型配置或网络连接")
-
-        if session_id:
-            add_message(session_id, "user", user_message)
-            add_message(session_id, "assistant", answer)
-            msg_count = get_message_count(session_id)
-            if msg_count == 2:
-                title = user_message[:30] + ("..." if len(user_message) > 30 else "")
-                update_session_title(session_id, title)
-            if msg_count > 0 and msg_count % SUMMARY_TRIGGER_COUNT == 0:
-                background_tasks.add_task(generate_summary_task, session_id)
-
-        return OpenAIChatResponse(
-            model=request.model,
-            choices=[
-                OpenAIChatChoice(
-                    message=OpenAIMessage(role="assistant", content=answer)
-                )
-            ]
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return OpenAIChatResponse(
+        model=request.model,
+        choices=[
+            OpenAIChatChoice(
+                message=OpenAIMessage(role="assistant", content=answer)
+            )
+        ]
+    )
 
 # ============================================================
 # 会话管理端点
@@ -1479,14 +1681,16 @@ init_vectorstore()
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("启动课程助手API（检索优化版）...")
-    print(f"SILICONFLOW_API_KEY: {'已设置' if siliconflow_api_key else '未设置'}")
-    print(f"BAILIAN_API_KEY: {'已设置' if bailian_api_key else '未设置'}")
-    print(f"BAILIAN_BASE_URL: {bailian_base_url}")
-    print(f"BAILIAN_MODEL: {bailian_model}")
-    print(f"SILICONFLOW_BASE_URL: {siliconflow_base_url}")
-    print(f"SILICONFLOW_MODEL: {siliconflow_embedding_model}")
+    print("启动知识库API（检索优化版）...")
+    print(f"LLM_API_KEY: {'已设置' if llm_api_key else '未设置'}")
+    print(f"LLM_BASE_URL: {llm_base_url}")
+    print(f"LLM_MODEL: {llm_model}")
+    print(f"EMBEDDING_API_KEY: {'已设置' if embedding_api_key else '未设置'}")
+    print(f"EMBEDDING_BASE_URL: {embedding_base_url}")
+    print(f"EMBEDDING_MODEL: {embedding_model_name}")
     print(f"RERANKER_MODEL: {RERANKER_MODEL}")
+    print(f"RERANKER_API_KEY: {'已设置' if reranker_api_key else '未设置'}")
+    print(f"RERANKER_BASE_URL: {reranker_base_url}")
     print(f"数据库路径: {DB_PATH}")
     print(f"最大历史轮数: {MAX_HISTORY_EXCHANGES}")
     print(f"会话过期天数: {SESSION_MAX_AGE_DAYS}")

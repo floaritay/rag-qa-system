@@ -170,7 +170,7 @@ class RAGEvaluator:
 def get_sample_test_cases():
     """
     生成示例测试用例
-    请根据您的实际课程资料修改这些测试用例
+    请根据您的实际文档修改这些测试用例
     """
     return [
         {
@@ -189,11 +189,11 @@ def get_sample_test_cases():
 
 if __name__ == "__main__":
     print("启动RAG系统评估...")
-    
+
     # 设置环境变量（如果需要）
-    if not os.getenv("BAILIAN_API_KEY"):
-        print("警告: 请先设置BAILIAN_API_KEY环境变量")
-        print("使用方式: set BAILIAN_API_KEY=你的API密钥")
+    if not os.getenv("LLM_API_KEY"):
+        print("警告: 请先设置LLM_API_KEY环境变量")
+        print("使用方式: 在项目根目录创建 .env 文件并设置 LLM_API_KEY=你的API密钥")
         sys.exit(1)
     
     try:
@@ -206,7 +206,7 @@ if __name__ == "__main__":
         # 运行评估
         evaluator.print_report(test_cases)
         
-        print("\n提示: 请根据您的实际课程资料修改 get_sample_test_cases() 函数中的测试用例")
+        print("\n提示: 请根据您的实际文档修改 get_sample_test_cases() 函数中的测试用例")
         print("以获得更准确的评估结果")
         
     except Exception as e:

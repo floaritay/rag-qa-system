@@ -1740,3 +1740,21 @@ body {
         font-size: 12px;
     }
 }
+
+/* Streaming cursor */
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+.streaming-cursor::after {
+    content: '▋';
+    display: inline-block;
+    animation: blink 0.8s step-end infinite;
+    color: #c87941;
+    margin-left: 2px;
+}
+
+.sources-panel-slot:empty {
+    display: none;
+}

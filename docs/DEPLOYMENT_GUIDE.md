@@ -1,7 +1,7 @@
-# 校园课程助手部署与使用指南
+# 个人知识库部署与使用指南
 
 ## 项目概述
-校园课程助手是一个基于RAG（检索增强生成）技术的智能问答系统，使用LangChain作为后端核心，原生Web界面或Open WebUI作为前端界面，帮助学生快速获取课程相关信息。
+个人知识库是一个基于RAG（检索增强生成）技术的智能问答系统，使用LangChain作为后端核心，原生Web界面或Open WebUI作为前端界面，帮助用户快速从个人文档中获取信息。
 
 ## 技术架构
 - **后端**：LangChain + FastAPI
@@ -29,17 +29,20 @@ pip install -r backend\requirements.txt
 ```
 
 ### 2. 配置环境变量
-```bash
-# Windows
-set BAILIAN_API_KEY=你的百炼平台API密钥
+在项目根目录创建 `.env` 文件：
 
-# Linux/Mac
-export BAILIAN_API_KEY=你的百炼平台API密钥
+```
+LLM_API_KEY=你的LLM API密钥
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen3.5-122b-a10b
+EMBEDDING_API_KEY=你的嵌入API密钥
+EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-m3
 ```
 
-### 3. 准备课程资料
-将PDF格式的课程资料放入 `d:\你的文件目录\course_materials` 文件夹（如果不存在请创建）。  
-支持的文件类型：PDF。
+### 3. 准备文档资料
+将文档（PDF/PPTX/DOCX/MD）放入 `d:\你的文件目录\course_materials` 文件夹（如果不存在请创建）。
+支持的文件类型：PDF、PPTX、DOCX、Markdown。
 
 ### 4. 启动后端服务
 ```bash
@@ -52,7 +55,7 @@ python backend\main.py
 
 服务将在 http://localhost:8001 运行
 
-### 5. 初始化知识库（首次使用或新增课程资料时）
+### 5. 初始化知识库（首次使用或新增文档时）
 ```bash
 # 使用PowerShell
 Invoke-WebRequest -Uri "http://localhost:8001/init" -Method POST
@@ -117,7 +120,7 @@ open-webui serve
    - "机器学习课程的成绩构成是怎样的？"
    - "数据库实验报告怎么写？"
    - "Python编程课程的重点内容有哪些？"
-9. 点击发送按钮，系统会基于课程资料给出回答
+9. 点击发送按钮，系统会基于知识库中的文档给出回答
 
 ### 7. 验证项目运行状态
 
@@ -146,7 +149,7 @@ open-webui serve
    # 使用PowerShell
    Invoke-WebRequest -Uri "http://localhost:8001/" -Method GET
    ```
-   预期返回：`{"message": "课程助手API已启动，访问 /ask 接口进行问答，/init 接口初始化知识库"}`
+   预期返回：`{"message": "知识库API已启动，访问 /ask 接口进行问答，/init 接口初始化知识库"}`
    ```bash
    :: 使用CMD
    curl http://127.0.0.1:8001/
@@ -172,7 +175,7 @@ open-webui serve
    curl http://localhost:8001/v1/models
    
    # 聊天补全（测试用）
-   curl -X POST http://localhost:8001/v1/chat/completions -H "Content-Type: application/json" -d "{\"model\":\"course-assistant\",\"messages\":[{\"role\":\"user\",\"content\":\"你好\"}]}"
+   curl -X POST http://localhost:8001/v1/chat/completions -H "Content-Type: application/json" -d "{\"model\":\"knowledge-base\",\"messages\":[{\"role\":\"user\",\"content\":\"你好\"}]}"
    ```
 
 ## 常见问题
@@ -180,16 +183,16 @@ open-webui serve
 ### 1. 初始化知识库失败  
 **错误信息**：`创建向量库失败: Error code: 404 - {'error': {'code': 'InvalidEndpointOrModel.NotFound', ...}}`
 
-**解决方案**：  
-- 确保百炼平台API密钥正确
+**解决方案**：
+- 确保LLM API密钥正确
 - 确保网络连接正常
-- 确保 `course_materials` 文件夹中有PDF文件
+- 确保 `course_materials` 文件夹中有文档文件
 
-### 2. API调用返回503错误   
-**错误信息**：`未设置BAILIAN_API_KEY环境变量`
+### 2. API调用返回503错误
+**错误信息**：`未设置LLM_API_KEY环境变量`
 
-**解决方案**：  
-- 确保已正确设置BAILIAN\_API\_KEY环境变量
+**解决方案**：
+- 确保已正确设置LLM\_API\_KEY环境变量
 - 重启FastAPI服务
 
 ### 3. Open WebUI无法连接到后端  
@@ -199,11 +202,11 @@ open-webui serve
 - 检查网络连接
 - Open WebUI在conda环境运行，后端在全局环境运行是可以的，它们通过网络端口通信
 
-### 4. 查询显示"在提供的课程资料中找不到相关信息"
-**解决方案**：  
-- 确保 `course_materials` 文件夹中有相关PDF文件
+### 4. 查询显示"在提供的知识库中找不到相关信息"
+**解决方案**：
+- 确保 `course_materials` 文件夹中有相关文档文件
 - 调用 `/init?force_rebuild=true` 强制重建知识库
-- 确保问题与课程资料内容相关
+- 确保问题与文档内容相关
 
 ## 项目结构
 ```
@@ -215,8 +218,8 @@ open-webui serve
 ├── frontend/                   # 前端服务
 │   ├── app.py                 # 主服务
 │   └── requirements.txt       # Python 依赖
-├── course_materials/           # 课程资料存放目录（不存在需手动创建）
-│   └── *.pdf                  # PDF 课程文件
+├── course_materials/           # 文档存放目录（不存在需手动创建）
+│   └── *.pdf                  # PDF 文档文件
 ├── course_knowledge_base/      # 向量库存储目录（自动生成）
 │   ├── index.faiss        # FAISS 索引文件
 │   └── index.pkl          # FAISS 元数据文件
@@ -229,7 +232,7 @@ open-webui serve
 ## 技术说明
 - **文档处理**：使用PyPDFLoader加载PDF文件，RecursiveCharacterTextSplitter分割文本
 - **向量存储**：使用FAISS本地向量数据库，无需外部服务
-- **模型调用**：使用百炼平台的qwen-plus语言模型和text-embedding-v2嵌入模型
+- **模型调用**：使用百炼平台的qwen-plus语言模型和text-embedding-v2嵌入模型（可替换为任意 OpenAI 兼容 API）
 - **API接口**：提供RESTful API和OpenAI兼容API，支持健康检查、知识库初始化和问答功能
 - **CORS配置**：已配置跨域支持，允许所有来源访问
 
@@ -262,12 +265,12 @@ netstat -ano | findstr :8001
 
 ## 附录：嵌入模型说明
 
-嵌入模型是校园课程助手项目的核心基础，可以用一个比喻理解：
+嵌入模型是个人知识库项目的核心基础，可以用一个比喻理解：
 
-课程 PDF 里的文字是「人类语言」（比如 "机器学习成绩构成：平时 30%+ 期末 70%"），计算机看不懂；
+文档里的文字是「人类语言」（比如 "机器学习成绩构成：平时 30%+ 期末 70%"），计算机看不懂；
 嵌入模型的作用就是把这些「文字」转换成一串数字向量（比如 [0.123, -0.456, 0.789...]），这串数字能被计算机理解和计算；
 当你提问 "机器学习成绩怎么算？" 时，系统会把问题也转换成向量，然后在向量库里找「最相似的向量」，再把对应的文字回复给你 —— 这个 "找相似" 的过程，就是 RAG 技术的核心。
-简单说：嵌入模型是 "文字→数字向量" 的转换器，没有它，你的课程资料无法被检索、无法实现智能问答。
+简单说：嵌入模型是 "文字→数字向量" 的转换器，没有它，你的文档无法被检索、无法实现智能问答。
 
 ## 附录：向量库重建说明
 
@@ -284,7 +287,7 @@ netstat -ano | findstr :8001
 - 加载全局变量（如 bailian_api_key）；
 - 不会执行任何向量库创建逻辑，也就不会调用嵌入模型。
 
-## 附录：课程资料更新说明
+## 附录：文档更新说明
 
 course_materials 文件夹文件变动后，会自动更新向量库吗？
 
