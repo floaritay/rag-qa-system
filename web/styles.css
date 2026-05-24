@@ -1048,6 +1048,10 @@ body {
     background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(4px);
     z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow-y: auto;
     opacity: 0;
     visibility: hidden;
     transition: opacity var(--t-normal), visibility var(--t-normal);
@@ -1059,24 +1063,22 @@ body {
 }
 
 .settings-panel {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) scale(0.95);
     width: 420px;
     max-width: 90vw;
     max-height: 90vh;
+    margin: auto 0;
     display: flex;
     flex-direction: column;
     background: var(--bg-surface);
     border: 1px solid var(--border-default);
     border-radius: var(--r-xl);
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+    transform: scale(0.95) translateY(10px);
     transition: transform var(--t-normal);
 }
 
 .settings-overlay.open .settings-panel {
-    transform: translate(-50%, -50%) scale(1);
+    transform: scale(1) translateY(0);
 }
 
 .settings-header {
