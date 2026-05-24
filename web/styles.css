@@ -1048,9 +1048,6 @@ body {
     background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(4px);
     z-index: 200;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     opacity: 0;
     visibility: hidden;
     transition: opacity var(--t-normal), visibility var(--t-normal);
@@ -1062,18 +1059,24 @@ body {
 }
 
 .settings-panel {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.95);
     width: 420px;
     max-width: 90vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
     background: var(--bg-surface);
     border: 1px solid var(--border-default);
     border-radius: var(--r-xl);
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
-    transform: scale(0.95) translateY(10px);
     transition: transform var(--t-normal);
 }
 
 .settings-overlay.open .settings-panel {
-    transform: scale(1) translateY(0);
+    transform: translate(-50%, -50%) scale(1);
 }
 
 .settings-header {
@@ -1082,6 +1085,7 @@ body {
     justify-content: space-between;
     padding: 20px 24px 16px;
     border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
 }
 
 .settings-header h3 {
@@ -1124,6 +1128,9 @@ body {
 /* Settings body / tab panels */
 .settings-body {
     padding: 20px 24px 24px;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .tab-panel {

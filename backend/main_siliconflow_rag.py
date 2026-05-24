@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -1489,9 +1489,9 @@ SILICONFLOW_KNOWN_FREE_MODELS = {
 
 
 @app.get("/models/siliconflow")
-async def get_siliconflow_models(api_key: Optional[str] = None):
+async def get_siliconflow_models(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     """获取硅基流动可用模型列表，按类型分类。"""
-    key = api_key or embedding_api_key
+    key = x_api_key or embedding_api_key
     if not key:
         return {"status": "success", "models": SILICONFLOW_KNOWN_FREE_MODELS, "source": "hardcoded"}
 

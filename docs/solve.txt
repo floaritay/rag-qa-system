@@ -434,4 +434,3 @@
 
 ### 主要改动
 - `backend/main_siliconflow_rag.py` L254：`_resolve_startup_key()` 去掉 `or siliconflow_api_key` 回退
-- 新增 `_resolve_startup_key(base_url, env_key_name)` 函数，根据 URL 类型选择正确的 API Key

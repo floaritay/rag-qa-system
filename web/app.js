@@ -960,10 +960,10 @@ async function fetchSiliconFlowModels(apiKey) {
     });
 
     try {
-        const url = apiKey
-            ? `${API_URL}/models/siliconflow?api_key=${encodeURIComponent(apiKey)}`
-            : `${API_URL}/models/siliconflow`;
-        const res = await fetch(url);
+        const url = `${API_URL}/models/siliconflow`;
+        const headers = {};
+        if (apiKey) headers['X-API-Key'] = apiKey;
+        const res = await fetch(url, { headers });
         if (!res.ok) throw new Error('请求失败');
         const data = await res.json();
         const models = data.models || {};
