@@ -4,6 +4,8 @@ course_knowledge_base/
 .env
 # 忽略PDF源文件
 course_materials/
+#
+review/
 
 style.md
 style.txt

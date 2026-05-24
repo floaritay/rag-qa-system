@@ -391,3 +391,47 @@
 - ChatOpenAI初始化添加 `request_timeout=120, max_retries=2`
 - SiliconFlowEmbeddings的timeout从60改为120
 - 添加启动配置信息打印和请求处理日志
+
+## 问题21：自定义模型重启后显示为硅基流动，报400 Model does not exist
+
+### 遇到的问题
+- 用户在前端将某个模型（如LLM）切换到自定义模式，填入自定义的模型名称、Base URL和API Key后保存
+- 重启后端后，该模型在前端显示为硅基流动模式，请求时报错：`Error code: 400 - {'code': 20012, 'message': 'Model does not exist. Please check it carefully.'}`
+
+### 分析
+- 前端 `loadConfig()` 中，自定义模式的输入框（模型名称、Base URL、API Key）被清空，没有用已保存的配置预填
+- 用户保存时如果自定义字段为空，`saveConfig()` 发送空字符串，后端 `resolve_base_url()` 遇到空值会保留旧值，导致 Base URL 仍为硅基流动地址
+- 后端启动时，`embedding_base_url`、`reranker_base_url`、`llm_base_url` 硬编码为 `SILICONFLOW_BASE_URL`，忽略了 `.env` 中已保存的自定义 URL
+- 此外，`.env` 中 `LLM_API_KEY` 存的是旧的百炼平台 key，但 `LLM_BASE_URL` 是硅基流动地址，启动时读取了错误的 key
+
+### 解决方法
+1. 前端 `loadConfig()` 中，当检测到 provider 为 'custom' 时，用后端返回的配置预填模型名称和 Base URL，API Key 以掩码形式显示为 placeholder
+2. 后端启动时，从 `.env` 读取 `LLM_BASE_URL`、`EMBEDDING_BASE_URL`、`RERANKER_BASE_URL`，不再硬编码为硅基流动地址
+3. 新增 `_resolve_startup_key()` 函数：如果 base_url 包含 "siliconflow"，使用共享的 `siliconflow_api_key`；否则使用对应的环境变量 key
+
+### 主要改动
+- `web/app.js` 的 `loadConfig()` 函数：根据 provider 类型决定是否预填自定义字段
+  - siliconflow 模式：清空自定义字段
+  - custom 模式：预填 model 和 base_url，API Key 显示掩码 placeholder
+- `backend/main_siliconflow_rag.py` 启动配置加载：
+  - `embedding_base_url = os.getenv("EMBEDDING_BASE_URL") or SILICONFLOW_BASE_URL`
+  - `reranker_base_url = os.getenv("RERANKER_BASE_URL") or SILICONFLOW_BASE_URL`
+  - `llm_base_url = os.getenv("LLM_BASE_URL") or SILICONFLOW_BASE_URL`
+
+## 问题22：API key 解析逻辑回退到硅基流动 key
+
+### 遇到的问题
+- `_resolve_startup_key()` 在 `base_url` 不包含 'siliconflow' 且环境变量未设置时，仍返回 `siliconflow_api_key`
+- 用户使用自定义 URL 但忘记设置 API key 时，会静默使用硅基流动的 key，导致认证失败且难以排查
+
+### 分析
+- 原代码 `return os.getenv(env_key_name) or siliconflow_api_key`，当 env 为 None 时 `None or siliconflow_api_key` 回退到硅基流动 key
+- 调用方已有 `if not api_key` 的守卫检查，能正确处理 None 的情况
+
+### 解决方法
+- 改为 `return os.getenv(env_key_name)`，不再回退到硅基流动 key
+- 调用方（`init_vectorstore`、`/init` 端点等）已有 None 检查，会给出明确的错误提示
+
+### 主要改动
+- `backend/main_siliconflow_rag.py` L254：`_resolve_startup_key()` 去掉 `or siliconflow_api_key` 回退
+- 新增 `_resolve_startup_key(base_url, env_key_name)` 函数，根据 URL 类型选择正确的 API Key

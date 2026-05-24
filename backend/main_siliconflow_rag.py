@@ -45,7 +45,6 @@ SESSION_MAX_AGE_DAYS = 7
 SUMMARY_TRIGGER_COUNT = 10
 
 # 检索优化配置
-RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 VECTOR_WEIGHT = 0.7       # 混合检索中向量检索权重
 BM25_WEIGHT = 0.3          # 混合检索中 BM25 权重
 HYBRID_CANDIDATE_K = 15    # 混合检索候选数量
@@ -234,19 +233,29 @@ reranker = None
 bm25_index = None
 bm25_docs = None
 
-# 嵌入模型配置（OpenAI 兼容 API）
-embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "https://api.siliconflow.cn/v1")
-embedding_api_key = os.getenv("EMBEDDING_API_KEY")
+# 硅基流动共享配置（所有 SF 模型共用 base_url 和 api_key）
+SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
+siliconflow_api_key = os.getenv("SILICONFLOW_API_KEY") or os.getenv("EMBEDDING_API_KEY") or os.getenv("LLM_API_KEY")
+
+# 各模型配置（默认全部使用硅基流动，但尊重 .env 中的自定义值）
+embedding_base_url = os.getenv("EMBEDDING_BASE_URL") or SILICONFLOW_BASE_URL
 embedding_model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
-# 重排序模型配置（OpenAI 兼容 API，默认使用嵌入模型的 API）
-reranker_base_url = os.getenv("RERANKER_BASE_URL") or embedding_base_url
-reranker_api_key = os.getenv("RERANKER_API_KEY") or embedding_api_key
+reranker_base_url = os.getenv("RERANKER_BASE_URL") or SILICONFLOW_BASE_URL
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 
-# LLM 配置（OpenAI 兼容 API）
-llm_base_url = os.getenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-llm_api_key = os.getenv("LLM_API_KEY")
-llm_model = os.getenv("LLM_MODEL", "qwen3.5-122b-a10b")
+llm_base_url = os.getenv("LLM_BASE_URL") or SILICONFLOW_BASE_URL
+llm_model = os.getenv("LLM_MODEL", "Qwen/Qwen3-8B")
+
+# API key: 硅基流动 URL 使用共享 key，自定义 URL 使用各自的 key
+def _resolve_startup_key(base_url, env_key_name):
+    if "siliconflow" in (base_url or ""):
+        return siliconflow_api_key
+    return os.getenv(env_key_name)
+
+embedding_api_key = _resolve_startup_key(embedding_base_url, "EMBEDDING_API_KEY")
+reranker_api_key = _resolve_startup_key(reranker_base_url, "RERANKER_API_KEY")
+llm_api_key = _resolve_startup_key(llm_base_url, "LLM_API_KEY")
 
 # 数据库路径
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -674,6 +683,213 @@ def create_vectorstore(texts):
         print("错误：向量库创建失败")
         return None
 
+
+def _embed_texts(texts):
+    """对清理后的 Document 列表做 embedding，返回 FAISS 索引（不保存到磁盘）。"""
+    if not texts:
+        return None
+    emb = OpenAICompatibleEmbeddings()
+    batch_size = 32
+    vs = None
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        valid = [d for d in batch if hasattr(d, 'page_content') and d.page_content.strip()]
+        if valid:
+            if vs is None:
+                vs = FAISS.from_documents(valid, emb)
+            else:
+                vs.merge_from(FAISS.from_documents(valid, emb))
+    return vs
+
+
+def _clean_docs(texts):
+    """清洗 Document 列表，去除空内容和非法字符。"""
+    from langchain_core.documents import Document
+    cleaned = []
+    for doc in texts:
+        if hasattr(doc, 'page_content'):
+            content = str(doc.page_content).strip()
+            content = ''.join(c for c in content if ord(c) >= 32 or c in '\n\t')
+            if content:
+                cleaned.append(Document(page_content=content, metadata=doc.metadata))
+    return cleaned
+
+
+def _load_single_file(file_path):
+    """加载单个文档文件，返回 Document 列表。"""
+    LOADER_MAP = {
+        ".pdf": lambda fp: PyPDFLoader(fp).load(),
+        ".pptx": _load_pptx,
+        ".docx": _load_docx,
+        ".md": lambda fp: TextLoader(fp, autodetect_encoding=True).load(),
+    }
+    ext = os.path.splitext(file_path)[1].lower()
+    loader = LOADER_MAP.get(ext)
+    if not loader:
+        return []
+    try:
+        docs = loader(file_path)
+        return docs if docs else []
+    except Exception as e:
+        print(f"  [ERROR] 加载 {file_path}: {e}")
+        return []
+
+
+def load_manifest():
+    """加载 manifest.json，返回 {filename: {mtime, chunks}} 字典。"""
+    manifest_path = os.path.join(base_dir, "course_knowledge_base", "manifest.json")
+    if os.path.exists(manifest_path):
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"files": {}}
+
+
+def save_manifest(manifest):
+    """保存 manifest.json。"""
+    manifest_path = os.path.join(base_dir, "course_knowledge_base", "manifest.json")
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+
+def index_new_files():
+    """增量索引：只处理 course_materials 中新增或修改的文件，合并到现有索引。"""
+    global vectorstore, bm25_index, bm25_docs
+
+    kb_path = os.path.join(base_dir, "course_knowledge_base")
+    materials_path = os.path.join(base_dir, "course_materials")
+
+    if not os.path.isdir(materials_path):
+        return {"status": "success", "indexed": [], "message": "course_materials 目录不存在"}
+
+    if not os.path.isdir(kb_path):
+        return {"status": "error", "message": "知识库不存在，请先调用 /init 初始化"}
+
+    manifest = load_manifest()
+    indexed_files = manifest.get("files", {})
+
+    # 有索引但无 manifest（旧数据兼容），需要全量重建
+    if not indexed_files:
+        print("增量索引：检测到旧索引无 manifest，执行全量重建...")
+        success = init_vectorstore(force_rebuild=True)
+        if success:
+            return {"status": "success", "indexed": ["full_rebuild"], "message": "旧索引无 manifest，已全量重建"}
+        return {"status": "error", "message": "全量重建失败"}
+
+    # 扫描 course_materials，找出新增或修改的文件
+    SUPPORTED_EXTS = {".pdf", ".pptx", ".docx", ".md"}
+    new_files = []
+    for filename in os.listdir(materials_path):
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in SUPPORTED_EXTS:
+            continue
+        fp = os.path.join(materials_path, filename)
+        mtime = os.stat(fp).st_mtime
+        if filename not in indexed_files or indexed_files[filename].get("mtime") != mtime:
+            new_files.append(filename)
+
+    if not new_files:
+        return {"status": "success", "indexed": [], "message": "无新增或修改的文件"}
+
+    print(f"增量索引：发现 {len(new_files)} 个新文件: {new_files}")
+
+    # 确保全局对象已初始化
+    if vectorstore is None:
+        vectorstore = FAISS.load_local(kb_path, embeddings, allow_dangerous_deserialization=True)
+    if bm25_index is None or bm25_docs is None:
+        bm25_path = os.path.join(kb_path, "bm25_index.pkl")
+        if os.path.exists(bm25_path):
+            with open(bm25_path, "rb") as f:
+                bm25_data = pickle.load(f)
+            bm25_index = BM25Okapi(bm25_data["tokenized_corpus"])
+            bm25_docs = bm25_data["documents"]
+
+    indexed = []
+    all_new_docs = []
+    for filename in new_files:
+        fp = os.path.join(materials_path, filename)
+        mtime = os.stat(fp).st_mtime
+        docs = _load_single_file(fp)
+        if not docs:
+            print(f"  [SKIP] {filename} (无有效文本)")
+            continue
+        texts = split_documents(docs)
+        texts = _clean_docs(texts)
+        if not texts:
+            continue
+        temp_vs = _embed_texts(texts)
+        if temp_vs:
+            vectorstore.merge_from(temp_vs)
+            all_new_docs.extend(texts)
+            indexed.append({"file": filename, "chunks": len(texts)})
+            indexed_files[filename] = {"mtime": mtime, "chunks": len(texts)}
+            print(f"  [OK] {filename} -> {len(texts)} 个文本块")
+
+    if indexed:
+        vectorstore.save_local(kb_path)
+        print(f"向量库已保存，新增 {len(all_new_docs)} 个文本块")
+
+        # 追加 BM25 索引
+        if bm25_docs is None:
+            bm25_docs = []
+        bm25_docs.extend(all_new_docs)
+        tokenized_corpus = [tokenize(d.page_content) for d in bm25_docs]
+        bm25_index = BM25Okapi(tokenized_corpus)
+        bm25_path = os.path.join(kb_path, "bm25_index.pkl")
+        with open(bm25_path, "wb") as f:
+            pickle.dump({"tokenized_corpus": tokenized_corpus, "documents": bm25_docs}, f)
+
+        manifest["files"] = indexed_files
+        save_manifest(manifest)
+
+    return {"status": "success", "indexed": indexed, "message": f"增量索引完成，处理 {len(indexed)} 个文件"}
+
+
+def remove_file_from_index(filename):
+    """从 FAISS 和 BM25 索引中移除指定文件的所有向量。"""
+    global vectorstore, bm25_index, bm25_docs
+
+    kb_path = os.path.join(base_dir, "course_knowledge_base")
+
+    if vectorstore is None:
+        if not os.path.isdir(kb_path):
+            return {"status": "error", "message": "知识库不存在"}
+        if embeddings is None:
+            return {"status": "error", "message": "embeddings 未初始化，请先调用 /init"}
+        vectorstore = FAISS.load_local(kb_path, embeddings, allow_dangerous_deserialization=True)
+
+    # 从 docstore 中查找属于该文件的所有 docstore ID
+    ids_to_delete = []
+    for idx, doc_id in vectorstore.index_to_docstore_id.items():
+        doc = vectorstore.docstore.search(doc_id)
+        if doc and os.path.basename(doc.metadata.get("source", "")) == filename:
+            ids_to_delete.append(doc_id)
+
+    if not ids_to_delete:
+        return {"status": "success", "removed": 0, "message": f"索引中未找到 {filename} 的向量"}
+
+    vectorstore.delete(ids_to_delete)
+    vectorstore.save_local(kb_path)
+    print(f"已从 FAISS 索引中移除 {filename} 的 {len(ids_to_delete)} 个向量")
+
+    # 重建 BM25 索引（排除被删除文件的文档）
+    if bm25_docs is not None:
+        bm25_docs = [d for d in bm25_docs if os.path.basename(d.metadata.get("source", "")) != filename]
+        tokenized_corpus = [tokenize(d.page_content) for d in bm25_docs]
+        bm25_index = BM25Okapi(tokenized_corpus) if bm25_docs else None
+        bm25_path = os.path.join(kb_path, "bm25_index.pkl")
+        with open(bm25_path, "wb") as f:
+            pickle.dump({"tokenized_corpus": tokenized_corpus, "documents": bm25_docs}, f)
+        print(f"BM25 索引已更新（剩余 {len(bm25_docs)} 个文档）")
+
+    # 更新 manifest
+    manifest = load_manifest()
+    if filename in manifest.get("files", {}):
+        del manifest["files"][filename]
+        save_manifest(manifest)
+
+    return {"status": "success", "removed": len(ids_to_delete), "message": f"已移除 {filename} 的 {len(ids_to_delete)} 个向量"}
+
+
 def init_vectorstore(force_rebuild=False):
     global vectorstore, retriever, embeddings, llm, reranker
     global bm25_index, bm25_docs
@@ -725,6 +941,13 @@ def init_vectorstore(force_rebuild=False):
                 print(f"BM25 索引已加载 ({len(bm25_docs)} 个文档)")
             else:
                 print("警告：BM25 索引文件不存在，混合检索不可用。请使用 /init?force_rebuild=true 重建知识库")
+
+            # 加载 manifest
+            manifest = load_manifest()
+            if manifest.get("files"):
+                print(f"manifest 已加载 ({len(manifest['files'])} 个文件)")
+            else:
+                print("manifest 为空，将在下次增量索引时全量重建")
         else:
             try:
                 docs = load_documents(materials_path)
@@ -738,6 +961,20 @@ def init_vectorstore(force_rebuild=False):
                             bm25_data = pickle.load(f)
                         bm25_index = BM25Okapi(bm25_data["tokenized_corpus"])
                         bm25_docs = bm25_data["documents"]
+
+                    # 构建 manifest
+                    chunk_counts = {}
+                    for doc in texts:
+                        fname = os.path.basename(doc.metadata.get("source", ""))
+                        if fname:
+                            chunk_counts[fname] = chunk_counts.get(fname, 0) + 1
+                    manifest = {"files": {}}
+                    for fname, count in chunk_counts.items():
+                        fp = os.path.join(materials_path, fname)
+                        if os.path.isfile(fp):
+                            manifest["files"][fname] = {"mtime": os.stat(fp).st_mtime, "chunks": count}
+                    save_manifest(manifest)
+                    print(f"manifest 已构建 ({len(manifest['files'])} 个文件)")
                     print("从文档创建了新的向量库和 BM25 索引")
                 else:
                     print("未找到文档，向量库未初始化")
@@ -1074,6 +1311,7 @@ def save_env_file():
     """Save current config to .env file, preserving comments and formatting"""
     env_path = os.path.join(base_dir, ".env")
     updates = {
+        "SILICONFLOW_API_KEY": siliconflow_api_key or "",
         "LLM_API_KEY": llm_api_key or "",
         "LLM_BASE_URL": llm_base_url,
         "LLM_MODEL": llm_model,
@@ -1111,6 +1349,7 @@ def save_env_file():
 @app.get("/config")
 async def get_config():
     return {
+        "siliconflow_api_key": mask_key(siliconflow_api_key) if siliconflow_api_key else "",
         "llm": {
             "model": llm_model,
             "base_url": llm_base_url,
@@ -1136,33 +1375,50 @@ async def update_config(request: dict):
     global llm, embeddings, reranker, RERANKER_MODEL
     global reranker_base_url, reranker_api_key
 
-    llm_cfg = request.get("llm", {})
-    emb_cfg = request.get("embedding", {})
-    rer_cfg = request.get("reranker", {})
+    global siliconflow_api_key
 
-    # Update LLM config
-    if "model" in llm_cfg and llm_cfg["model"]:
-        llm_model = llm_cfg["model"]
-    if "base_url" in llm_cfg and llm_cfg["base_url"]:
-        llm_base_url = llm_cfg["base_url"]
-    if "api_key" in llm_cfg and llm_cfg["api_key"] and not llm_cfg["api_key"].startswith("***"):
-        llm_api_key = llm_cfg["api_key"]
+    sf_key = request.get("siliconflow_api_key", "")
+    if sf_key and not sf_key.startswith("***"):
+        siliconflow_api_key = sf_key
 
-    # Update embedding config
-    if "base_url" in emb_cfg and emb_cfg["base_url"]:
-        embedding_base_url = emb_cfg["base_url"]
-    if "api_key" in emb_cfg and emb_cfg["api_key"] and not emb_cfg["api_key"].startswith("***"):
-        embedding_api_key = emb_cfg["api_key"]
-    if "model" in emb_cfg and emb_cfg["model"]:
-        embedding_model_name = emb_cfg["model"]
+    # 优先使用新格式 models，回退到顶层 llm/embedding/reranker
+    models = request.get("models", {})
+    llm_cfg = models.get("llm") or request.get("llm", {})
+    emb_cfg = models.get("embedding") or request.get("embedding", {})
+    rer_cfg = models.get("reranker") or request.get("reranker", {})
 
-    # Update reranker config
-    if "model" in rer_cfg and rer_cfg["model"]:
-        RERANKER_MODEL = rer_cfg["model"]
-    if "base_url" in rer_cfg and rer_cfg["base_url"]:
-        reranker_base_url = rer_cfg["base_url"]
-    if "api_key" in rer_cfg and rer_cfg["api_key"] and not rer_cfg["api_key"].startswith("***"):
-        reranker_api_key = rer_cfg["api_key"]
+    def resolve_key(cfg, existing_key):
+        """解析 API key：显式指定 > 硅基流动共享 key > 保留现有"""
+        k = cfg.get("api_key", "")
+        if k and not k.startswith("***"):
+            return k
+        # 硅基流动 URL 自动用共享 key
+        base = cfg.get("base_url") or ""
+        if "siliconflow" in base and siliconflow_api_key:
+            return siliconflow_api_key
+        return existing_key
+
+    def resolve_base_url(cfg, existing):
+        return cfg.get("base_url") or existing
+
+    # 更新 LLM
+    if llm_cfg.get("model"): llm_model = llm_cfg["model"]
+    llm_base_url = resolve_base_url(llm_cfg, llm_base_url)
+    llm_api_key = resolve_key(llm_cfg, llm_api_key)
+
+    # 更新 Embedding
+    if emb_cfg.get("model"): embedding_model_name = emb_cfg["model"]
+    embedding_base_url = resolve_base_url(emb_cfg, embedding_base_url)
+    embedding_api_key = resolve_key(emb_cfg, embedding_api_key)
+
+    # 更新 Reranker
+    if rer_cfg.get("model"): RERANKER_MODEL = rer_cfg["model"]
+    reranker_base_url = resolve_base_url(rer_cfg, reranker_base_url)
+    reranker_api_key = resolve_key(rer_cfg, reranker_api_key)
+
+    print(f"[配置更新] LLM: {llm_model} @ {llm_base_url}")
+    print(f"[配置更新] Embedding: {embedding_model_name} @ {embedding_base_url}")
+    print(f"[配置更新] Reranker: {RERANKER_MODEL} @ {reranker_base_url}")
 
     # Reinitialize components
     errors = []
@@ -1199,6 +1455,84 @@ async def update_config(request: dict):
         return {"status": "partial", "message": "; ".join(errors)}
 
     return {"status": "success", "message": "配置已更新并保存"}
+
+
+# SiliconFlow 免费模型列表（硬编码兜底，同时支持从 API 动态获取）
+SILICONFLOW_KNOWN_FREE_MODELS = {
+    "llm": [
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen3-14B",
+        "Qwen/Qwen3-30B-A3B-Instruct-2507",
+        "Qwen/Qwen3.5-4B",
+        "Qwen/Qwen3.5-9B",
+        "Qwen/Qwen3.5-27B",
+        "Qwen/Qwen3.5-35B-A3B",
+        "Qwen/Qwen2.5-7B-Instruct",
+        "THUDM/GLM-4-9B-0414",
+        "THUDM/GLM-Z1-9B-0414",
+        "deepseek-ai/DeepSeek-V3",
+        "deepseek-ai/DeepSeek-R1",
+        "deepseek-ai/DeepSeek-V4-Flash",
+        "zai-org/GLM-4.5-Air",
+    ],
+    "embedding": [
+        "BAAI/bge-large-zh-v1.5",
+        "BAAI/bge-large-en-v1.5",
+        "BAAI/bge-m3",
+        "netease-youdao/bce-embedding-base_v1",
+    ],
+    "reranker": [
+        "BAAI/bge-reranker-v2-m3",
+        "netease-youdao/bce-reranker-base_v1",
+    ],
+}
+
+
+@app.get("/models/siliconflow")
+async def get_siliconflow_models(api_key: Optional[str] = None):
+    """获取硅基流动可用模型列表，按类型分类。"""
+    key = api_key or embedding_api_key
+    if not key:
+        return {"status": "success", "models": SILICONFLOW_KNOWN_FREE_MODELS, "source": "hardcoded"}
+
+    try:
+        resp = requests.get(
+            "https://api.siliconflow.cn/v1/models",
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        all_models = [m["id"] for m in data.get("data", [])]
+
+        llm, emb, rerank = [], [], []
+        for mid in all_models:
+            low = mid.lower()
+            # 跳过 Pro/ 前缀（付费）和 LoRA/ 前缀
+            if mid.startswith("Pro/") or mid.startswith("LoRA/"):
+                continue
+            if "rerank" in low:
+                rerank.append(mid)
+            elif "embed" in low or (low.startswith("bge-") and "rerank" not in low):
+                emb.append(mid)
+            elif any(kw in low for kw in [
+                "instruct", "chat", "-v3", "-v4", "-r1", "qwen", "glm",
+                "llama", "internlm", "minimax", "yi-", "baichuan",
+                "deepseek", "seed-oss", "hunyuan-a13b", "step-",
+                "ling-flash", "ling-mini", "kimi",
+            ]):
+                llm.append(mid)
+
+        models = {
+            "llm": sorted(llm),
+            "embedding": sorted(emb),
+            "reranker": sorted(rerank),
+        }
+        return {"status": "success", "models": models, "source": "api"}
+    except Exception as e:
+        print(f"获取硅基流动模型列表失败: {e}")
+        return {"status": "success", "models": SILICONFLOW_KNOWN_FREE_MODELS, "source": "hardcoded"}
+
 
 @app.post("/init")
 async def init_knowledge_base(force_rebuild: bool = False):
@@ -1270,7 +1604,20 @@ async def upload_material(files: List[UploadFile] = File(...)):
 
         if errors:
             return {"status": "partial" if uploaded else "error", "uploaded": uploaded, "errors": errors}
-        return {"status": "success", "uploaded": uploaded}
+
+        # 上传成功后自动增量索引
+        index_result = index_new_files()
+        return {"status": "success", "uploaded": uploaded, "index": index_result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/materials/index")
+async def index_materials():
+    """手动触发增量索引，只处理新增或修改的文件。"""
+    try:
+        result = index_new_files()
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1291,7 +1638,11 @@ async def delete_material(filename: str):
             raise HTTPException(status_code=404, detail=f"文件不存在: {filename}")
 
         os.remove(fp)
-        return {"status": "success", "message": f"已删除: {filename}"}
+
+        # 从索引中移除该文件的向量
+        index_result = remove_file_from_index(filename)
+
+        return {"status": "success", "message": f"已删除: {filename}", "index": index_result}
     except HTTPException:
         raise
     except Exception as e:
@@ -1338,6 +1689,7 @@ async def ask_stream(query: Query, background_tasks: BackgroundTasks):
 
             yield "data: [DONE]\n\n"
         except Exception as e:
+            print(f"[ask/stream 错误] {e}")
             yield f"data: {json.dumps({'type': 'error', 'data': str(e)}, ensure_ascii=False)}\n\n"
 
         # 流式完成后保存消息
@@ -1682,15 +2034,10 @@ init_vectorstore()
 if __name__ == "__main__":
     print("=" * 50)
     print("启动知识库API（检索优化版）...")
-    print(f"LLM_API_KEY: {'已设置' if llm_api_key else '未设置'}")
-    print(f"LLM_BASE_URL: {llm_base_url}")
-    print(f"LLM_MODEL: {llm_model}")
-    print(f"EMBEDDING_API_KEY: {'已设置' if embedding_api_key else '未设置'}")
-    print(f"EMBEDDING_BASE_URL: {embedding_base_url}")
-    print(f"EMBEDDING_MODEL: {embedding_model_name}")
-    print(f"RERANKER_MODEL: {RERANKER_MODEL}")
-    print(f"RERANKER_API_KEY: {'已设置' if reranker_api_key else '未设置'}")
-    print(f"RERANKER_BASE_URL: {reranker_base_url}")
+    print(f"硅基流动 API Key: {'已设置' if siliconflow_api_key else '未设置'}")
+    print(f"LLM: {llm_model} @ {llm_base_url}")
+    print(f"Embedding: {embedding_model_name} @ {embedding_base_url}")
+    print(f"Reranker: {RERANKER_MODEL} @ {reranker_base_url}")
     print(f"数据库路径: {DB_PATH}")
     print(f"最大历史轮数: {MAX_HISTORY_EXCHANGES}")
     print(f"会话过期天数: {SESSION_MAX_AGE_DAYS}")

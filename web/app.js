@@ -26,6 +26,9 @@ const dom = {
     settingsBtn: $('settingsBtn'),
     settingsOverlay: $('settingsOverlay'),
     settingsClose: $('settingsClose'),
+    modelSettingsBtn: $('modelSettingsBtn'),
+    modelSettingsOverlay: $('modelSettingsOverlay'),
+    modelSettingsClose: $('modelSettingsClose'),
     rebuildBtn: $('rebuildBtn'),
     retrievalStrategySelect: $('retrievalStrategySelect'),
     preRetrievalSelect: $('preRetrievalSelect'),
@@ -40,7 +43,13 @@ const dom = {
     cfgEmbBaseUrl: $('cfgEmbBaseUrl'),
     cfgEmbApiKey: $('cfgEmbApiKey'),
     cfgRerankerModel: $('cfgRerankerModel'),
+    cfgRerankerBaseUrl: $('cfgRerankerBaseUrl'),
+    cfgRerankerApiKey: $('cfgRerankerApiKey'),
     saveConfigBtn: $('saveConfigBtn'),
+    sfApiKey: $('sfApiKey'),
+    sfLlmModelSelect: $('sfLlmModelSelect'),
+    sfEmbModelSelect: $('sfEmbModelSelect'),
+    sfRerankerModelSelect: $('sfRerankerModelSelect'),
     kbManageBtn: $('kbManageBtn'),
     kbOverlay: $('kbOverlay'),
     kbClose: $('kbClose'),
@@ -650,6 +659,9 @@ async function askQuestion(question) {
                             accumulated += event.data;
                             contentEl.innerHTML = renderMarkdown(accumulated);
                             scrollChatBottom();
+                        } else if (event.type === 'error') {
+                            accumulated = `[错误] ${event.data}`;
+                            contentEl.innerHTML = `<p style="color: var(--red);">请求失败：${escapeHtml(event.data)}</p>`;
                         }
                     } catch {
                         // skip malformed JSON
@@ -841,13 +853,20 @@ function handleKeyDown(e) {
 // ============================================================
 function openSettings() {
     dom.settingsOverlay.classList.add('open');
-    loadConfig();
 }
 
 function closeSettings() {
     dom.settingsOverlay.classList.remove('open');
-    // Close all open selects
     document.querySelectorAll('.custom-select.open').forEach(s => s.classList.remove('open'));
+}
+
+function openModelSettings() {
+    dom.modelSettingsOverlay.classList.add('open');
+    loadConfig();
+}
+
+function closeModelSettings() {
+    dom.modelSettingsOverlay.classList.remove('open');
 }
 
 function getSelectValue(id) {
@@ -898,18 +917,97 @@ function initCustomSelects() {
     });
 }
 
-function initSettingsTabs() {
-    document.querySelectorAll('.settings-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            const target = tab.dataset.tab;
-            // Update tab buttons
-            document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            // Update panels
-            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-            const panel = target === 'model' ? document.getElementById('tabModel') : document.getElementById('tabStrategy');
-            if (panel) panel.classList.add('active');
+// ============================================================
+// Per-Model Provider Mini Toggles
+// ============================================================
+const modelProviders = { llm: 'siliconflow', embedding: 'siliconflow', reranker: 'siliconflow' };
+
+function initMiniToggles() {
+    document.querySelectorAll('.mini-toggle').forEach(toggle => {
+        const target = toggle.dataset.target;
+        toggle.querySelectorAll('.mini-toggle-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const provider = btn.dataset.value;
+                modelProviders[target] = provider;
+                toggle.querySelectorAll('.mini-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.value === provider));
+                const section = toggle.closest('.settings-section-title').nextElementSibling;
+                if (section) {
+                    section.querySelector('.model-sf').style.display = provider === 'siliconflow' ? '' : 'none';
+                    section.querySelector('.model-custom').style.display = provider === 'custom' ? '' : 'none';
+                }
+            });
         });
+    });
+
+    // Fetch models when API key changes (with debounce)
+    let debounceTimer = null;
+    dom.sfApiKey.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            const key = dom.sfApiKey.value.trim();
+            if (key && !key.startsWith('***')) {
+                fetchSiliconFlowModels(key);
+            }
+        }, 800);
+    });
+}
+
+async function fetchSiliconFlowModels(apiKey) {
+    const selects = [dom.sfLlmModelSelect, dom.sfEmbModelSelect, dom.sfRerankerModelSelect];
+    selects.forEach(s => {
+        const label = s.querySelector('.custom-select-label');
+        label.textContent = '加载中...';
+    });
+
+    try {
+        const url = apiKey
+            ? `${API_URL}/models/siliconflow?api_key=${encodeURIComponent(apiKey)}`
+            : `${API_URL}/models/siliconflow`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('请求失败');
+        const data = await res.json();
+        const models = data.models || {};
+
+        populateModelSelect(dom.sfLlmModelSelect, models.llm || []);
+        populateModelSelect(dom.sfEmbModelSelect, models.embedding || []);
+        populateModelSelect(dom.sfRerankerModelSelect, models.reranker || []);
+    } catch {
+        selects.forEach(s => {
+            const label = s.querySelector('.custom-select-label');
+            label.textContent = '加载失败，请重试';
+        });
+    }
+}
+
+function populateModelSelect(selectEl, models) {
+    const menu = selectEl.querySelector('.custom-select-menu');
+    const label = selectEl.querySelector('.custom-select-label');
+    menu.innerHTML = '';
+
+    if (models.length === 0) {
+        label.textContent = '暂无可用模型';
+        selectEl.dataset.value = '';
+        return;
+    }
+
+    // Set first model as default
+    selectEl.dataset.value = models[0];
+    label.textContent = models[0];
+
+    models.forEach(m => {
+        const opt = document.createElement('div');
+        opt.className = 'custom-select-option' + (m === models[0] ? ' selected' : '');
+        opt.dataset.value = m;
+        opt.innerHTML = `<span class="option-label">${escapeHtml(m)}</span>`;
+        opt.addEventListener('click', (e) => {
+            e.stopPropagation();
+            menu.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+            selectEl.dataset.value = m;
+            label.textContent = m;
+            selectEl.classList.remove('open');
+        });
+        menu.appendChild(opt);
     });
 }
 
@@ -927,7 +1025,7 @@ function updateStrategyConstraints() {
 }
 
 // ============================================================
-// Config Load / Save
+// Config Load / Save (mixed providers)
 // ============================================================
 async function loadConfig() {
     try {
@@ -935,40 +1033,126 @@ async function loadConfig() {
         if (!res.ok) return;
         const cfg = await res.json();
 
-        dom.cfgLlmModel.value = cfg.llm?.model || '';
-        dom.cfgLlmBaseUrl.value = cfg.llm?.base_url || '';
-        dom.cfgLlmApiKey.value = '';
-        dom.cfgLlmApiKey.placeholder = cfg.llm?.api_key || '未设置';
+        // SiliconFlow API key
+        dom.sfApiKey.value = '';
+        dom.sfApiKey.placeholder = cfg.siliconflow_api_key || '未设置';
 
-        dom.cfgEmbModel.value = cfg.embedding?.model || '';
-        dom.cfgEmbBaseUrl.value = cfg.embedding?.base_url || '';
-        dom.cfgEmbApiKey.value = '';
-        dom.cfgEmbApiKey.placeholder = cfg.embedding?.api_key || '未设置';
+        // Detect per-model provider from base_url
+        const isSF = (url) => url && url.includes('siliconflow');
+        const llmProv = isSF(cfg.llm?.base_url) ? 'siliconflow' : 'custom';
+        const embProv = isSF(cfg.embedding?.base_url) ? 'siliconflow' : 'custom';
+        const rerProv = isSF(cfg.reranker?.base_url) ? 'siliconflow' : 'custom';
 
-        dom.cfgRerankerModel.value = cfg.reranker?.model || '';
+        // Set mini toggles
+        setMiniToggle('llm', llmProv);
+        setMiniToggle('embedding', embProv);
+        setMiniToggle('reranker', rerProv);
+
+        // Fetch SiliconFlow models
+        await fetchSiliconFlowModels();
+
+        // Set SiliconFlow dropdown values
+        if (cfg.llm?.model && llmProv === 'siliconflow') setCustomSelectValue(dom.sfLlmModelSelect, cfg.llm.model);
+        if (cfg.embedding?.model && embProv === 'siliconflow') setCustomSelectValue(dom.sfEmbModelSelect, cfg.embedding.model);
+        if (cfg.reranker?.model && rerProv === 'siliconflow') setCustomSelectValue(dom.sfRerankerModelSelect, cfg.reranker.model);
+
+        // Custom fields — pre-fill with saved values when provider is custom
+        if (llmProv === 'custom') {
+            dom.cfgLlmModel.value = cfg.llm?.model || '';
+            dom.cfgLlmBaseUrl.value = cfg.llm?.base_url || '';
+            dom.cfgLlmApiKey.value = '';
+            dom.cfgLlmApiKey.placeholder = cfg.llm?.api_key || '输入 API Key';
+        } else {
+            dom.cfgLlmModel.value = '';
+            dom.cfgLlmBaseUrl.value = '';
+            dom.cfgLlmApiKey.value = '';
+            dom.cfgLlmBaseUrl.placeholder = '例如 https://api.openai.com/v1';
+            dom.cfgLlmApiKey.placeholder = '输入 API Key';
+        }
+
+        if (embProv === 'custom') {
+            dom.cfgEmbModel.value = cfg.embedding?.model || '';
+            dom.cfgEmbBaseUrl.value = cfg.embedding?.base_url || '';
+            dom.cfgEmbApiKey.value = '';
+            dom.cfgEmbApiKey.placeholder = cfg.embedding?.api_key || '输入 API Key';
+        } else {
+            dom.cfgEmbModel.value = '';
+            dom.cfgEmbBaseUrl.value = '';
+            dom.cfgEmbApiKey.value = '';
+            dom.cfgEmbBaseUrl.placeholder = '例如 https://api.openai.com/v1';
+            dom.cfgEmbApiKey.placeholder = '输入 API Key';
+        }
+
+        if (rerProv === 'custom') {
+            dom.cfgRerankerModel.value = cfg.reranker?.model || '';
+            dom.cfgRerankerBaseUrl.value = cfg.reranker?.base_url || '';
+            dom.cfgRerankerApiKey.value = '';
+            dom.cfgRerankerApiKey.placeholder = cfg.reranker?.api_key || '输入 API Key';
+        } else {
+            dom.cfgRerankerModel.value = '';
+            dom.cfgRerankerBaseUrl.value = '';
+            dom.cfgRerankerApiKey.value = '';
+            dom.cfgRerankerBaseUrl.placeholder = '例如 https://api.openai.com/v1';
+            dom.cfgRerankerApiKey.placeholder = '输入 API Key';
+        }
     } catch {
         // silent
     }
 }
 
+function setMiniToggle(target, provider) {
+    modelProviders[target] = provider;
+    const toggle = document.querySelector(`.mini-toggle[data-target="${target}"]`);
+    if (!toggle) return;
+    toggle.querySelectorAll('.mini-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.value === provider));
+    const section = toggle.closest('.settings-section-title').nextElementSibling;
+    if (section) {
+        section.querySelector('.model-sf').style.display = provider === 'siliconflow' ? '' : 'none';
+        section.querySelector('.model-custom').style.display = provider === 'custom' ? '' : 'none';
+    }
+}
+
+function setCustomSelectValue(selectEl, value) {
+    if (!value) return;
+    const menu = selectEl.querySelector('.custom-select-menu');
+    const label = selectEl.querySelector('.custom-select-label');
+    selectEl.dataset.value = value;
+    label.textContent = value;
+    // Try to mark matching option as selected
+    menu.querySelectorAll('.custom-select-option').forEach(o => {
+        o.classList.toggle('selected', o.dataset.value === value);
+    });
+}
+
+const SF_BASE = 'https://api.siliconflow.cn/v1';
+
 async function saveConfig() {
     dom.saveConfigBtn.disabled = true;
     dom.saveConfigBtn.textContent = '保存中...';
 
+    const sfKey = dom.sfApiKey.value.trim();
+
+    // Build per-model configs
+    const llmCfg = modelProviders.llm === 'siliconflow'
+        ? { model: dom.sfLlmModelSelect.dataset.value, base_url: SF_BASE, api_key: sfKey }
+        : { model: dom.cfgLlmModel.value.trim(), base_url: dom.cfgLlmBaseUrl.value.trim(), api_key: dom.cfgLlmApiKey.value.trim() };
+
+    const embCfg = modelProviders.embedding === 'siliconflow'
+        ? { model: dom.sfEmbModelSelect.dataset.value, base_url: SF_BASE, api_key: sfKey }
+        : { model: dom.cfgEmbModel.value.trim(), base_url: dom.cfgEmbBaseUrl.value.trim(), api_key: dom.cfgEmbApiKey.value.trim() };
+
+    const rerCfg = modelProviders.reranker === 'siliconflow'
+        ? { model: dom.sfRerankerModelSelect.dataset.value, base_url: SF_BASE, api_key: sfKey }
+        : { model: dom.cfgRerankerModel.value.trim(), base_url: dom.cfgRerankerBaseUrl.value.trim(), api_key: dom.cfgRerankerApiKey.value.trim() };
+
+    // Send both old format (top-level llm/embedding/reranker) and new format (models)
+    // for backward compatibility with older backend code
     const body = {
-        llm: {
-            model: dom.cfgLlmModel.value.trim(),
-            base_url: dom.cfgLlmBaseUrl.value.trim(),
-            api_key: dom.cfgLlmApiKey.value.trim(),
-        },
-        embedding: {
-            model: dom.cfgEmbModel.value.trim(),
-            base_url: dom.cfgEmbBaseUrl.value.trim(),
-            api_key: dom.cfgEmbApiKey.value.trim(),
-        },
-        reranker: {
-            model: dom.cfgRerankerModel.value.trim(),
-        },
+        siliconflow_api_key: sfKey,
+        llm: llmCfg,
+        embedding: embCfg,
+        reranker: rerCfg,
+        models: { llm: llmCfg, embedding: embCfg, reranker: rerCfg },
     };
 
     try {
@@ -980,7 +1164,6 @@ async function saveConfig() {
         const result = await res.json();
         if (res.ok) {
             showToast(result.message || '配置已保存', 'success');
-            // Reload to show masked keys
             await loadConfig();
         } else {
             showToast(`保存失败：${result.detail || '未知错误'}`, 'error');
@@ -1021,6 +1204,12 @@ dom.settingsOverlay.addEventListener('click', (e) => {
     if (e.target === dom.settingsOverlay) closeSettings();
 });
 
+dom.modelSettingsBtn.addEventListener('click', openModelSettings);
+dom.modelSettingsClose.addEventListener('click', closeModelSettings);
+dom.modelSettingsOverlay.addEventListener('click', (e) => {
+    if (e.target === dom.modelSettingsOverlay) closeModelSettings();
+});
+
 dom.rebuildBtn.addEventListener('click', rebuildKnowledgeBase);
 dom.saveConfigBtn.addEventListener('click', saveConfig);
 
@@ -1052,6 +1241,7 @@ dom.kbUploadArea.addEventListener('drop', (e) => {
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         closeSettings();
+        closeModelSettings();
         closeKbPanel();
     }
 });
@@ -1066,6 +1256,6 @@ document.addEventListener('DOMContentLoaded', () => {
     bindChipClicks();
     updateMenuArrow();
     initCustomSelects();
-    initSettingsTabs();
+    initMiniToggles();
     setInterval(checkHealth, 30000);
 });
