@@ -2311,9 +2311,9 @@ async def rebuild_knowledge_base(kb_id: str):
 # ============================================================
 
 init_default_kb()
+kb_manager = KBManager(max_loaded=2)
 init_db()
 init_shared_models()
-kb_manager = KBManager(max_loaded=2)
 
 if __name__ == "__main__":
     print("=" * 50)

@@ -457,4 +457,22 @@
 
 ### 主要改动
 - `backend/main_siliconflow_rag.py` L1119-1125：`shutil.rmtree(kb_path)` 改为逐个删除索引文件
+
+### 问题：KBManager 实例化顺序问题
+**日期**：2026-05-28
+
+**现象**：
+- `kb_manager = KBManager(max_loaded=2)` 在 `init_default_kb()` 之前执行
+- `KBManager` 实例化时 registry.json 尚未创建
+
+**分析**：
+1. `KBManager.__init__()` 只初始化内部状态（`_loaded`, `_access_order`, `_lock`），不读取 registry
+2. `list_kbs()` 在调用时才读取 registry.json，所以当前代码不会出错
+3. 但顺序不合理——语义上应先初始化依赖（registry.json），再实例化使用依赖的对象
+
+**解决方案**：
+- 交换两行顺序：先调用 `init_default_kb()`，再实例化 `KBManager`
+
+### 主要改动
+- `backend/main_siliconflow_rag.py` L2313-2314：交换 `init_default_kb()` 和 `kb_manager = KBManager(max_loaded=2)` 的顺序
 - `backend/requirements.txt`：新增 `chardet>=5.0.0,<6.0.0`
