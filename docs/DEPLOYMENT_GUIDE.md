@@ -41,7 +41,7 @@ EMBEDDING_MODEL=BAAI/bge-m3
 ```
 
 ### 3. 准备文档资料
-将文档（PDF/PPTX/DOCX/MD）放入 `d:\你的文件目录\course_materials` 文件夹（如果不存在请创建）。
+通过前端"知识库管理"面板上传文档（PDF/PPTX/DOCX/MD），或放入 `knowledge_bases/default/materials/` 目录后重建索引。
 支持的文件类型：PDF、PPTX、DOCX、Markdown。
 
 ### 4. 启动后端服务
@@ -126,7 +126,7 @@ open-webui serve
 
 #### 检查向量库文件
 
-打开 `D:\你的文件目录\course_knowledge_base` 文件夹（启动服务并初始化后自动生成），能看到以下文件说明向量库创建成功：
+打开 `knowledge_bases/default` 文件夹（启动服务并初始化后自动生成），能看到以下文件说明向量库创建成功：
 - `index.faiss`  
 - `index.pkl`
 
@@ -186,7 +186,7 @@ open-webui serve
 **解决方案**：
 - 确保LLM API密钥正确
 - 确保网络连接正常
-- 确保 `course_materials` 文件夹中有文档文件
+- 确保 `knowledge_bases/default/materials` 文件夹中有文档文件
 
 ### 2. API调用返回503错误
 **错误信息**：`未设置LLM_API_KEY环境变量`
@@ -204,7 +204,7 @@ open-webui serve
 
 ### 4. 查询显示"在提供的知识库中找不到相关信息"
 **解决方案**：
-- 确保 `course_materials` 文件夹中有相关文档文件
+- 确保 `knowledge_bases/default/materials` 文件夹中有相关文档文件
 - 调用 `/init?force_rebuild=true` 强制重建知识库
 - 确保问题与文档内容相关
 
@@ -218,11 +218,12 @@ open-webui serve
 ├── frontend/                   # 前端服务
 │   ├── app.py                 # 主服务
 │   └── requirements.txt       # Python 依赖
-├── course_materials/           # 文档存放目录（不存在需手动创建）
-│   └── *.pdf                  # PDF 文档文件
-├── course_knowledge_base/      # 向量库存储目录（自动生成）
-│   ├── index.faiss        # FAISS 索引文件
-│   └── index.pkl          # FAISS 元数据文件
+├── knowledge_bases/            # 多知识库数据（自动生成）
+│   ├── registry.json           # 知识库注册表
+│   └── default/                # 默认知识库
+│       ├── index.faiss         # FAISS 索引文件
+│       ├── index.pkl           # FAISS 元数据文件
+│       └── materials/          # 文档存放目录
 ├── DEPLOYMENT_GUIDE.md         # 详细部署指南
 ├── web/                        # 原生前端界面代码
 ├── solve.txt                   # 问题解决记录
@@ -289,7 +290,7 @@ netstat -ano | findstr :8001
 
 ## 附录：文档更新说明
 
-course_materials 文件夹文件变动后，会自动更新向量库吗？
+knowledge_bases 下的文档文件变动后，会自动更新向量库吗？
 
 不会自动更新！代码中没有「监听文件变动→自动重建向量库」的逻辑，分情况处理：
 

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
     <div class="app">
@@ -23,6 +23,22 @@
                         </svg>
                     </div>
                     <span class="logo-text">知识库</span>
+                </div>
+            </div>
+
+            <!-- 知识库选择器 -->
+            <div class="kb-selector" id="kbSelector">
+                <div class="custom-select" id="kbSelect" data-value="default">
+                    <button class="custom-select-trigger" type="button">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span class="custom-select-label">默认知识库</span>
+                        <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                    </button>
+                    <div class="custom-select-menu" id="kbSelectMenu">
+                        <!-- 动态填充 -->
+                    </div>
                 </div>
             </div>
 
@@ -59,13 +75,6 @@
                         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                     </svg>
                     <span>检索策略</span>
-                </button>
-                <button class="sidebar-footer-btn" id="rebuildBtn" title="重建知识库">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="23 4 23 10 17 10"/>
-                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                    </svg>
-                    <span>重建知识库</span>
                 </button>
             </div>
         </aside>
@@ -383,20 +392,35 @@
                     </button>
                 </div>
                 <div class="kb-panel-body">
-                    <div class="kb-upload-area" id="kbUploadArea">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="17 8 12 3 7 8"/>
-                            <line x1="12" y1="3" x2="12" y2="15"/>
-                        </svg>
-                        <p>拖拽文件到此处，或点击选择文件</p>
-                        <span class="kb-upload-hint">支持 PDF / PPTX / DOCX / MD 格式</span>
-                        <input type="file" id="kbFileInput" accept=".pdf,.pptx,.docx,.md" multiple hidden>
-                    </div>
-                    <div class="kb-file-section">
-                        <div class="kb-file-section-title">文档列表</div>
-                        <div class="kb-file-list" id="kbFileList">
+                    <!-- 知识库列表区域 -->
+                    <div class="kb-list-section">
+                        <div class="kb-file-section-title">知识库列表</div>
+                        <div class="kb-list" id="kbList">
                             <!-- 动态填充 -->
+                        </div>
+                        <div class="kb-create-form" id="kbCreateForm">
+                            <input type="text" class="setting-input" id="kbNameInput" placeholder="新知识库名称">
+                            <button class="btn-accent" id="kbCreateBtn">创建</button>
+                        </div>
+                    </div>
+                    <!-- 文档管理区域（当前选中的知识库） -->
+                    <div class="kb-files-section">
+                        <div class="kb-file-section-title" id="kbFilesTitle">文档列表 — 默认知识库</div>
+                        <div class="kb-upload-area" id="kbUploadArea">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            <p>拖拽文件到此处，或点击选择文件</p>
+                            <span class="kb-upload-hint">支持 PDF / PPTX / DOCX / MD 格式</span>
+                            <input type="file" id="kbFileInput" accept=".pdf,.pptx,.docx,.md" multiple hidden>
+                        </div>
+                        <div class="kb-file-section">
+                            <div class="kb-file-section-title">文档列表</div>
+                            <div class="kb-file-list" id="kbFileList">
+                                <!-- 动态填充 -->
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -410,6 +434,6 @@
     <!-- Toast 通知 -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=3"></script>
 </body>
 </html>

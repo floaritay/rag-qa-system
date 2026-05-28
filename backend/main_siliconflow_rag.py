@@ -21,6 +21,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.embeddings import Embeddings
 from rank_bm25 import BM25Okapi
 import os
+import shutil
+import threading
 import uvicorn
 import requests
 from dotenv import load_dotenv
@@ -57,6 +59,7 @@ DEFAULT_TOP_K = 3          # 最终返回文档数
 class Query(BaseModel):
     question: str
     session_id: Optional[str] = None
+    kb_id: Optional[str] = None
     retrieval_strategy: Optional[str] = "default"   # "default" | "hybrid"
     pre_retrieval: Optional[str] = "none"            # "none" | "rewrite" | "hyde"
     post_retrieval: Optional[str] = "none"           # "none" | "rerank"
@@ -87,6 +90,7 @@ class OpenAIChatRequest(BaseModel):
     max_tokens: Optional[int] = None
     stream: Optional[bool] = False
     session_id: Optional[str] = None
+    kb_id: Optional[str] = None
     retrieval_strategy: Optional[str] = "default"
     pre_retrieval: Optional[str] = "none"
     post_retrieval: Optional[str] = "none"
@@ -112,14 +116,29 @@ class OpenAIChatResponse(BaseModel):
 # 会话相关模型
 class SessionCreate(BaseModel):
     title: Optional[str] = "新对话"
+    kb_id: Optional[str] = "default"
 
 class SessionInfo(BaseModel):
     session_id: str
+    kb_id: str = "default"
     title: str
     created_at: str
     updated_at: str
     summary: Optional[str] = None
     message_count: int = 0
+
+# 知识库相关模型
+class KBCreate(BaseModel):
+    name: str
+    description: Optional[str] = ""
+
+class KBInfo(BaseModel):
+    id: str
+    name: str
+    created_at: str
+    updated_at: str
+    description: str = ""
+    file_count: int = 0
 
 class SessionListResponse(BaseModel):
     sessions: List[SessionInfo]
@@ -223,15 +242,9 @@ HYDE_PROMPT = """请根据以下问题，写一段简短的假设性答案（约
 # ============================================================
 # 全局变量
 # ============================================================
-vectorstore = None
-retriever = None
 embeddings = None
 llm = None
 reranker = None
-
-# BM25 相关
-bm25_index = None
-bm25_docs = None
 
 # 硅基流动共享配置（所有 SF 模型共用 base_url 和 api_key）
 SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
@@ -373,6 +386,173 @@ def tokenize(text: str) -> list:
     return tokens
 
 # ============================================================
+# 多知识库管理器
+# ============================================================
+
+class KBManager:
+    """管理多个知识库，支持懒加载和 LRU 缓存淘汰"""
+
+    def __init__(self, max_loaded=2):
+        self._loaded = {}          # kb_id -> {vectorstore, bm25_index, bm25_docs, retriever}
+        self._max_loaded = max_loaded
+        self._access_order = []    # LRU 追踪
+        self._lock = threading.Lock()
+
+    def get_kb_path(self, kb_id: str) -> str:
+        return os.path.join(base_dir, "knowledge_bases", kb_id)
+
+    def get_materials_path(self, kb_id: str) -> str:
+        return os.path.join(self.get_kb_path(kb_id), "materials")
+
+    def registry_path(self) -> str:
+        return os.path.join(base_dir, "knowledge_bases", "registry.json")
+
+    def load_registry(self) -> dict:
+        path = self.registry_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {}
+
+    def save_registry(self, registry: dict):
+        path = self.registry_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(registry, f, ensure_ascii=False, indent=2)
+
+    def list_kbs(self) -> list:
+        registry = self.load_registry()
+        result = []
+        for kb_id, info in registry.items():
+            kb_path = self.get_kb_path(kb_id)
+            materials_path = self.get_materials_path(kb_id)
+            file_count = 0
+            if os.path.isdir(materials_path):
+                file_count = len([f for f in os.listdir(materials_path)
+                                  if os.path.isfile(os.path.join(materials_path, f)) and not f.startswith(".")])
+            result.append({**info, "file_count": file_count})
+        return result
+
+    def create_kb(self, name: str, description: str = "") -> dict:
+        slug = re.sub(r'[^a-zA-Z0-9一-鿿]+', '-', name).strip('-').lower()
+        if not slug:
+            slug = f"kb-{int(time.time())}"
+        registry = self.load_registry()
+        if slug in registry:
+            slug = f"{slug}-{int(time.time())}"
+        now = datetime.now().isoformat()
+        info = {"id": slug, "name": name, "created_at": now, "updated_at": now, "description": description}
+        registry[slug] = info
+        self.save_registry(registry)
+        kb_path = self.get_kb_path(slug)
+        os.makedirs(os.path.join(kb_path, "materials"), exist_ok=True)
+        return info
+
+    def delete_kb(self, kb_id: str) -> bool:
+        if kb_id == "default":
+            return False
+        registry = self.load_registry()
+        if kb_id not in registry:
+            return False
+        del registry[kb_id]
+        self.save_registry(registry)
+        self.invalidate(kb_id)
+        kb_path = self.get_kb_path(kb_id)
+        if os.path.isdir(kb_path):
+            shutil.rmtree(kb_path)
+        return True
+
+    def update_kb(self, kb_id: str, name: str = None, description: str = None) -> bool:
+        registry = self.load_registry()
+        if kb_id not in registry:
+            return False
+        if name is not None:
+            registry[kb_id]["name"] = name
+        if description is not None:
+            registry[kb_id]["description"] = description
+        registry[kb_id]["updated_at"] = datetime.now().isoformat()
+        self.save_registry(registry)
+        return True
+
+    def get(self, kb_id: str) -> dict:
+        with self._lock:
+            if kb_id in self._loaded:
+                self._touch(kb_id)
+                return self._loaded[kb_id]
+            while len(self._loaded) >= self._max_loaded:
+                evict_id = self._access_order.pop(0)
+                del self._loaded[evict_id]
+            data = self._load_from_disk(kb_id)
+            self._loaded[kb_id] = data
+            self._access_order.append(kb_id)
+            return data
+
+    def _load_from_disk(self, kb_id: str) -> dict:
+        global embeddings
+        kb_path = self.get_kb_path(kb_id)
+        if not os.path.isdir(kb_path):
+            raise FileNotFoundError(f"知识库 '{kb_id}' 不存在: {kb_path}")
+        faiss_path = os.path.join(kb_path, "index.faiss")
+        if not os.path.exists(faiss_path):
+            raise FileNotFoundError(f"知识库 '{kb_id}' 尚未构建索引，请先上传文档并构建")
+        vectorstore = FAISS.load_local(kb_path, embeddings, allow_dangerous_deserialization=True)
+        retriever = vectorstore.as_retriever(search_kwargs={"k": HYBRID_CANDIDATE_K})
+        bm25_index_obj = None
+        bm25_docs_list = None
+        bm25_path = os.path.join(kb_path, "bm25_index.pkl")
+        if os.path.exists(bm25_path):
+            with open(bm25_path, "rb") as f:
+                bm25_data = pickle.load(f)
+            bm25_index_obj = BM25Okapi(bm25_data["tokenized_corpus"])
+            bm25_docs_list = bm25_data["documents"]
+        return {
+            "vectorstore": vectorstore,
+            "bm25_index": bm25_index_obj,
+            "bm25_docs": bm25_docs_list,
+            "retriever": retriever,
+        }
+
+    def invalidate(self, kb_id: str):
+        with self._lock:
+            if kb_id in self._loaded:
+                del self._loaded[kb_id]
+                if kb_id in self._access_order:
+                    self._access_order.remove(kb_id)
+
+    def _touch(self, kb_id: str):
+        if kb_id in self._access_order:
+            self._access_order.remove(kb_id)
+        self._access_order.append(kb_id)
+
+
+def init_default_kb():
+    """确保默认知识库目录结构和 registry.json 存在"""
+    kb_root = os.path.join(base_dir, "knowledge_bases")
+    default_kb = os.path.join(kb_root, "default")
+    default_materials = os.path.join(default_kb, "materials")
+    os.makedirs(default_materials, exist_ok=True)
+
+    registry_path = os.path.join(kb_root, "registry.json")
+    if not os.path.exists(registry_path):
+        now = datetime.now().isoformat()
+        registry = {
+            "default": {
+                "id": "default",
+                "name": "默认知识库",
+                "created_at": now,
+                "updated_at": now,
+                "description": ""
+            }
+        }
+        with open(registry_path, "w", encoding="utf-8") as f:
+            json.dump(registry, f, ensure_ascii=False, indent=2)
+        print("创建知识库注册表: registry.json")
+
+
+# 全局知识库管理器实例
+kb_manager = None
+
+# ============================================================
 # SQLite 数据库函数
 # ============================================================
 
@@ -388,6 +568,7 @@ def init_db():
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS sessions (
             session_id TEXT PRIMARY KEY,
+            kb_id TEXT DEFAULT 'default',
             title TEXT DEFAULT '新对话',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -403,20 +584,25 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
     """)
+    # 迁移：为已有数据库添加 kb_id 列
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+    if "kb_id" not in columns:
+        conn.execute("ALTER TABLE sessions ADD COLUMN kb_id TEXT DEFAULT 'default'")
+        print("数据库迁移：添加 sessions.kb_id 列")
     conn.commit()
     conn.close()
     print("数据库初始化完成")
 
-def create_session(session_id: str, title: str = "新对话") -> dict:
+def create_session(session_id: str, title: str = "新对话", kb_id: str = "default") -> dict:
     now = datetime.now().isoformat()
     conn = get_db()
     conn.execute(
-        "INSERT INTO sessions (session_id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (session_id, title, now, now)
+        "INSERT INTO sessions (session_id, kb_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (session_id, kb_id, title, now, now)
     )
     conn.commit()
     conn.close()
-    return {"session_id": session_id, "title": title, "created_at": now, "updated_at": now}
+    return {"session_id": session_id, "kb_id": kb_id, "title": title, "created_at": now, "updated_at": now}
 
 def get_session(session_id: str) -> Optional[dict]:
     conn = get_db()
@@ -426,15 +612,25 @@ def get_session(session_id: str) -> Optional[dict]:
         return dict(row)
     return None
 
-def list_sessions() -> List[dict]:
+def list_sessions(kb_id: Optional[str] = None) -> List[dict]:
     conn = get_db()
-    rows = conn.execute("""
-        SELECT s.*, COUNT(m.id) as message_count
-        FROM sessions s
-        LEFT JOIN messages m ON s.session_id = m.session_id
-        GROUP BY s.session_id
-        ORDER BY s.updated_at DESC
-    """).fetchall()
+    if kb_id:
+        rows = conn.execute("""
+            SELECT s.*, COUNT(m.id) as message_count
+            FROM sessions s
+            LEFT JOIN messages m ON s.session_id = m.session_id
+            WHERE s.kb_id = ?
+            GROUP BY s.session_id
+            ORDER BY s.updated_at DESC
+        """, (kb_id,)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT s.*, COUNT(m.id) as message_count
+            FROM sessions s
+            LEFT JOIN messages m ON s.session_id = m.session_id
+            GROUP BY s.session_id
+            ORDER BY s.updated_at DESC
+        """).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -599,7 +795,7 @@ def split_documents(documents):
 # 向量库创建与初始化（含 BM25 索引构建）
 # ============================================================
 
-def create_vectorstore(texts):
+def create_vectorstore(texts, kb_id="default"):
     global embedding_api_key
 
     if not embedding_api_key:
@@ -665,7 +861,8 @@ def create_vectorstore(texts):
                 vs.merge_from(temp_vs)
 
     if vs:
-        kb_path = os.path.join(base_dir, "course_knowledge_base")
+        kb_path = kb_manager.get_kb_path(kb_id)
+        os.makedirs(kb_path, exist_ok=True)
         vs.save_local(kb_path)
         print(f"向量库已保存到 {kb_path}")
 
@@ -735,47 +932,45 @@ def _load_single_file(file_path):
         return []
 
 
-def load_manifest():
+def load_manifest(kb_id="default"):
     """加载 manifest.json，返回 {filename: {mtime, chunks}} 字典。"""
-    manifest_path = os.path.join(base_dir, "course_knowledge_base", "manifest.json")
+    manifest_path = os.path.join(kb_manager.get_kb_path(kb_id), "manifest.json")
     if os.path.exists(manifest_path):
         with open(manifest_path, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"files": {}}
 
 
-def save_manifest(manifest):
+def save_manifest(manifest, kb_id="default"):
     """保存 manifest.json。"""
-    manifest_path = os.path.join(base_dir, "course_knowledge_base", "manifest.json")
+    manifest_path = os.path.join(kb_manager.get_kb_path(kb_id), "manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
 
-def index_new_files():
-    """增量索引：只处理 course_materials 中新增或修改的文件，合并到现有索引。"""
-    global vectorstore, bm25_index, bm25_docs
-
-    kb_path = os.path.join(base_dir, "course_knowledge_base")
-    materials_path = os.path.join(base_dir, "course_materials")
+def index_new_files(kb_id="default"):
+    """增量索引：只处理指定知识库中新增或修改的文件，合并到现有索引。"""
+    kb_path = kb_manager.get_kb_path(kb_id)
+    materials_path = kb_manager.get_materials_path(kb_id)
 
     if not os.path.isdir(materials_path):
-        return {"status": "success", "indexed": [], "message": "course_materials 目录不存在"}
+        return {"status": "success", "indexed": [], "message": "文档目录不存在"}
 
     if not os.path.isdir(kb_path):
         return {"status": "error", "message": "知识库不存在，请先调用 /init 初始化"}
 
-    manifest = load_manifest()
+    manifest = load_manifest(kb_id)
     indexed_files = manifest.get("files", {})
 
     # 有索引但无 manifest（旧数据兼容），需要全量重建
     if not indexed_files:
         print("增量索引：检测到旧索引无 manifest，执行全量重建...")
-        success = init_vectorstore(force_rebuild=True)
+        success = init_vectorstore(kb_id=kb_id, force_rebuild=True)
         if success:
             return {"status": "success", "indexed": ["full_rebuild"], "message": "旧索引无 manifest，已全量重建"}
         return {"status": "error", "message": "全量重建失败"}
 
-    # 扫描 course_materials，找出新增或修改的文件
+    # 扫描材料目录，找出新增或修改的文件
     SUPPORTED_EXTS = {".pdf", ".pptx", ".docx", ".md"}
     new_files = []
     for filename in os.listdir(materials_path):
@@ -792,16 +987,10 @@ def index_new_files():
 
     print(f"增量索引：发现 {len(new_files)} 个新文件: {new_files}")
 
-    # 确保全局对象已初始化
-    if vectorstore is None:
-        vectorstore = FAISS.load_local(kb_path, embeddings, allow_dangerous_deserialization=True)
-    if bm25_index is None or bm25_docs is None:
-        bm25_path = os.path.join(kb_path, "bm25_index.pkl")
-        if os.path.exists(bm25_path):
-            with open(bm25_path, "rb") as f:
-                bm25_data = pickle.load(f)
-            bm25_index = BM25Okapi(bm25_data["tokenized_corpus"])
-            bm25_docs = bm25_data["documents"]
+    # 加载知识库数据
+    kb_data = kb_manager.get(kb_id)
+    vs = kb_data["vectorstore"]
+    bm25_docs_list = kb_data["bm25_docs"] or []
 
     indexed = []
     all_new_docs = []
@@ -818,81 +1007,78 @@ def index_new_files():
             continue
         temp_vs = _embed_texts(texts)
         if temp_vs:
-            vectorstore.merge_from(temp_vs)
+            vs.merge_from(temp_vs)
             all_new_docs.extend(texts)
             indexed.append({"file": filename, "chunks": len(texts)})
             indexed_files[filename] = {"mtime": mtime, "chunks": len(texts)}
             print(f"  [OK] {filename} -> {len(texts)} 个文本块")
 
     if indexed:
-        vectorstore.save_local(kb_path)
+        vs.save_local(kb_path)
         print(f"向量库已保存，新增 {len(all_new_docs)} 个文本块")
 
         # 追加 BM25 索引
-        if bm25_docs is None:
-            bm25_docs = []
-        bm25_docs.extend(all_new_docs)
-        tokenized_corpus = [tokenize(d.page_content) for d in bm25_docs]
-        bm25_index = BM25Okapi(tokenized_corpus)
+        bm25_docs_list.extend(all_new_docs)
+        tokenized_corpus = [tokenize(d.page_content) for d in bm25_docs_list]
         bm25_path = os.path.join(kb_path, "bm25_index.pkl")
         with open(bm25_path, "wb") as f:
-            pickle.dump({"tokenized_corpus": tokenized_corpus, "documents": bm25_docs}, f)
+            pickle.dump({"tokenized_corpus": tokenized_corpus, "documents": bm25_docs_list}, f)
 
         manifest["files"] = indexed_files
-        save_manifest(manifest)
+        save_manifest(manifest, kb_id)
+        kb_manager.invalidate(kb_id)
 
     return {"status": "success", "indexed": indexed, "message": f"增量索引完成，处理 {len(indexed)} 个文件"}
 
 
-def remove_file_from_index(filename):
+def remove_file_from_index(filename, kb_id="default"):
     """从 FAISS 和 BM25 索引中移除指定文件的所有向量。"""
-    global vectorstore, bm25_index, bm25_docs
+    kb_path = kb_manager.get_kb_path(kb_id)
 
-    kb_path = os.path.join(base_dir, "course_knowledge_base")
+    if not os.path.isdir(kb_path):
+        return {"status": "error", "message": "知识库不存在"}
 
-    if vectorstore is None:
-        if not os.path.isdir(kb_path):
-            return {"status": "error", "message": "知识库不存在"}
-        if embeddings is None:
-            return {"status": "error", "message": "embeddings 未初始化，请先调用 /init"}
-        vectorstore = FAISS.load_local(kb_path, embeddings, allow_dangerous_deserialization=True)
+    kb_data = kb_manager.get(kb_id)
+    vs = kb_data["vectorstore"]
+    bm25_docs_list = kb_data["bm25_docs"]
+    bm25_idx = kb_data["bm25_index"]
 
     # 从 docstore 中查找属于该文件的所有 docstore ID
     ids_to_delete = []
-    for idx, doc_id in vectorstore.index_to_docstore_id.items():
-        doc = vectorstore.docstore.search(doc_id)
+    for idx, doc_id in vs.index_to_docstore_id.items():
+        doc = vs.docstore.search(doc_id)
         if doc and os.path.basename(doc.metadata.get("source", "")) == filename:
             ids_to_delete.append(doc_id)
 
     if not ids_to_delete:
         return {"status": "success", "removed": 0, "message": f"索引中未找到 {filename} 的向量"}
 
-    vectorstore.delete(ids_to_delete)
-    vectorstore.save_local(kb_path)
+    vs.delete(ids_to_delete)
+    vs.save_local(kb_path)
     print(f"已从 FAISS 索引中移除 {filename} 的 {len(ids_to_delete)} 个向量")
 
     # 重建 BM25 索引（排除被删除文件的文档）
-    if bm25_docs is not None:
-        bm25_docs = [d for d in bm25_docs if os.path.basename(d.metadata.get("source", "")) != filename]
-        tokenized_corpus = [tokenize(d.page_content) for d in bm25_docs]
-        bm25_index = BM25Okapi(tokenized_corpus) if bm25_docs else None
+    if bm25_docs_list is not None:
+        bm25_docs_list = [d for d in bm25_docs_list if os.path.basename(d.metadata.get("source", "")) != filename]
+        tokenized_corpus = [tokenize(d.page_content) for d in bm25_docs_list]
         bm25_path = os.path.join(kb_path, "bm25_index.pkl")
         with open(bm25_path, "wb") as f:
-            pickle.dump({"tokenized_corpus": tokenized_corpus, "documents": bm25_docs}, f)
-        print(f"BM25 索引已更新（剩余 {len(bm25_docs)} 个文档）")
+            pickle.dump({"tokenized_corpus": tokenized_corpus, "documents": bm25_docs_list}, f)
+        print(f"BM25 索引已更新（剩余 {len(bm25_docs_list)} 个文档）")
 
     # 更新 manifest
-    manifest = load_manifest()
+    manifest = load_manifest(kb_id)
     if filename in manifest.get("files", {}):
         del manifest["files"][filename]
-        save_manifest(manifest)
+        save_manifest(manifest, kb_id)
 
+    kb_manager.invalidate(kb_id)
     return {"status": "success", "removed": len(ids_to_delete), "message": f"已移除 {filename} 的 {len(ids_to_delete)} 个向量"}
 
 
-def init_vectorstore(force_rebuild=False):
-    global vectorstore, retriever, embeddings, llm, reranker
-    global bm25_index, bm25_docs
+def init_shared_models():
+    """初始化共享的 embeddings、LLM、reranker（仅需执行一次）"""
+    global embeddings, llm, reranker
     global embedding_api_key, llm_api_key, llm_base_url, llm_model
     try:
         if not embedding_api_key:
@@ -914,36 +1100,61 @@ def init_vectorstore(force_rebuild=False):
             request_timeout=120,
             max_retries=2
         )
-
-        # 初始化重排序器
         reranker = OpenAICompatibleReranker()
         print(f"重排序器已初始化 (模型: {RERANKER_MODEL})")
+        return True
+    except Exception as e:
+        print(f"初始化共享模型失败: {e}")
+        return False
 
-        kb_path = os.path.join(base_dir, "course_knowledge_base")
-        materials_path = os.path.join(base_dir, "course_materials")
+
+def init_vectorstore(kb_id="default", force_rebuild=False):
+    """初始化指定知识库的向量库和 BM25 索引"""
+    try:
+        if not embeddings:
+            print("共享模型未初始化，请先调用 init_shared_models()")
+            return False
+
+        kb_path = kb_manager.get_kb_path(kb_id)
+        materials_path = kb_manager.get_materials_path(kb_id)
 
         if force_rebuild and os.path.exists(kb_path):
-            import shutil
-            shutil.rmtree(kb_path)
-            print("已删除旧的向量库，准备重新创建")
+            # 只删除索引文件，保留 materials 目录
+            for fname in ["index.faiss", "index.pkl", "bm25_index.pkl", "manifest.json"]:
+                fpath = os.path.join(kb_path, fname)
+                if os.path.exists(fpath):
+                    os.remove(fpath)
+            print("已删除旧的索引文件，准备重新创建")
 
         if not force_rebuild and os.path.exists(kb_path):
             vectorstore = FAISS.load_local(kb_path, embeddings, allow_dangerous_deserialization=True)
+            retriever = vectorstore.as_retriever(search_kwargs={"k": HYBRID_CANDIDATE_K})
             print("成功加载现有向量库")
 
             # 加载 BM25 索引
+            bm25_index_obj = None
+            bm25_docs_list = None
             bm25_path = os.path.join(kb_path, "bm25_index.pkl")
             if os.path.exists(bm25_path):
                 with open(bm25_path, "rb") as f:
                     bm25_data = pickle.load(f)
-                bm25_index = BM25Okapi(bm25_data["tokenized_corpus"])
-                bm25_docs = bm25_data["documents"]
-                print(f"BM25 索引已加载 ({len(bm25_docs)} 个文档)")
+                bm25_index_obj = BM25Okapi(bm25_data["tokenized_corpus"])
+                bm25_docs_list = bm25_data["documents"]
+                print(f"BM25 索引已加载 ({len(bm25_docs_list)} 个文档)")
             else:
                 print("警告：BM25 索引文件不存在，混合检索不可用。请使用 /init?force_rebuild=true 重建知识库")
 
+            # 存入缓存
+            kb_manager._loaded[kb_id] = {
+                "vectorstore": vectorstore,
+                "bm25_index": bm25_index_obj,
+                "bm25_docs": bm25_docs_list,
+                "retriever": retriever,
+            }
+            kb_manager._touch(kb_id)
+
             # 加载 manifest
-            manifest = load_manifest()
+            manifest = load_manifest(kb_id)
             if manifest.get("files"):
                 print(f"manifest 已加载 ({len(manifest['files'])} 个文件)")
             else:
@@ -953,14 +1164,7 @@ def init_vectorstore(force_rebuild=False):
                 docs = load_documents(materials_path)
                 if docs:
                     texts = split_documents(docs)
-                    vectorstore = create_vectorstore(texts)
-                    # 构建后同时加载 BM25
-                    bm25_path = os.path.join(kb_path, "bm25_index.pkl")
-                    if os.path.exists(bm25_path):
-                        with open(bm25_path, "rb") as f:
-                            bm25_data = pickle.load(f)
-                        bm25_index = BM25Okapi(bm25_data["tokenized_corpus"])
-                        bm25_docs = bm25_data["documents"]
+                    create_vectorstore(texts, kb_id)
 
                     # 构建 manifest
                     chunk_counts = {}
@@ -973,7 +1177,7 @@ def init_vectorstore(force_rebuild=False):
                         fp = os.path.join(materials_path, fname)
                         if os.path.isfile(fp):
                             manifest["files"][fname] = {"mtime": os.stat(fp).st_mtime, "chunks": count}
-                    save_manifest(manifest)
+                    save_manifest(manifest, kb_id)
                     print(f"manifest 已构建 ({len(manifest['files'])} 个文件)")
                     print("从文档创建了新的向量库和 BM25 索引")
                 else:
@@ -983,7 +1187,8 @@ def init_vectorstore(force_rebuild=False):
                 print(f"创建向量库失败: {e}")
                 return False
 
-        retriever = vectorstore.as_retriever(search_kwargs={"k": HYBRID_CANDIDATE_K})
+            kb_manager.invalidate(kb_id)
+
         return True
     except Exception as e:
         print(f"初始化向量库失败: {e}")
@@ -1030,20 +1235,24 @@ def hyde_generate(question: str) -> str:
 # 混合检索策略（向量 + BM25 + RRF 融合）
 # ============================================================
 
-def hybrid_retrieve(query: str, k: int = DEFAULT_TOP_K) -> list:
+def hybrid_retrieve(query: str, k: int = DEFAULT_TOP_K, kb_id: str = "default") -> list:
     """混合检索：FAISS 向量检索 + BM25 关键词检索，倒数排名融合"""
+    kb_data = kb_manager.get(kb_id)
+    vs = kb_data["vectorstore"]
+    bm25_idx = kb_data["bm25_index"]
+    bm25_docs_list = kb_data["bm25_docs"]
     candidate_k = HYBRID_CANDIDATE_K
 
     # 1. 向量检索
-    vector_docs = vectorstore.similarity_search(query, k=candidate_k)
+    vector_docs = vs.similarity_search(query, k=candidate_k)
 
     # 2. BM25 检索
     bm25_results = []
-    if bm25_index is not None and bm25_docs is not None:
+    if bm25_idx is not None and bm25_docs_list is not None:
         query_tokens = tokenize(query)
-        scores = bm25_index.get_scores(query_tokens)
+        scores = bm25_idx.get_scores(query_tokens)
         top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:candidate_k]
-        bm25_results = [bm25_docs[i] for i in top_indices if scores[i] > 0]
+        bm25_results = [bm25_docs_list[i] for i in top_indices if scores[i] > 0]
 
     # 3. 倒数排名融合（Reciprocal Rank Fusion）
     doc_scores = {}
@@ -1108,9 +1317,13 @@ def extract_sources(docs, top_k=DEFAULT_TOP_K):
 
 
 def rag_query(question: str, session_id: Optional[str] = None,
+              kb_id: str = "default",
               retrieval_strategy: str = "default",
               pre_retrieval: str = "none",
               post_retrieval: str = "none") -> tuple:
+    kb_data = kb_manager.get(kb_id)
+    vs = kb_data["vectorstore"]
+
     # 1. 预检索优化
     search_query = question
     if pre_retrieval == "rewrite":
@@ -1120,26 +1333,24 @@ def rag_query(question: str, session_id: Optional[str] = None,
 
     # 2. 检索
     if pre_retrieval == "hyde":
-        # HyDE：用假设答案的 embedding 向量检索（带分数）
         hyde_embedding = embeddings.embed_query(search_query)
-        scored = vectorstore.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
+        scored = vs.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
         docs = []
         for doc, score in scored:
             if hasattr(doc, 'metadata'):
                 doc.metadata['vector_score'] = round(float(score), 4)
             docs.append(doc)
     elif retrieval_strategy == "hybrid":
-        docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K)
+        docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K, kb_id=kb_id)
     else:
-        # 默认向量检索（带分数）
-        scored = vectorstore.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
+        scored = vs.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
         docs = []
         for doc, score in scored:
             if hasattr(doc, 'metadata'):
                 doc.metadata['vector_score'] = round(float(score), 4)
             docs.append(doc)
 
-    # 3. 后检索优化：重排序（用原始问题，不用改写后的查询词）
+    # 3. 后检索优化：重排序
     if post_retrieval == "rerank" and reranker:
         docs = reranker.rerank(question, docs, top_n=DEFAULT_TOP_K)
 
@@ -1164,10 +1375,14 @@ def rag_query(question: str, session_id: Optional[str] = None,
     return answer_text, sources
 
 def rag_query_stateless(question: str,
+                        kb_id: str = "default",
                         retrieval_strategy: str = "default",
                         pre_retrieval: str = "none",
                         post_retrieval: str = "none") -> tuple:
     """无状态 RAG 查询"""
+    kb_data = kb_manager.get(kb_id)
+    vs = kb_data["vectorstore"]
+
     search_query = question
     if pre_retrieval == "rewrite":
         search_query = rewrite_query(question)
@@ -1176,16 +1391,16 @@ def rag_query_stateless(question: str,
 
     if pre_retrieval == "hyde":
         hyde_embedding = embeddings.embed_query(search_query)
-        scored = vectorstore.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
+        scored = vs.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
         docs = []
         for doc, score in scored:
             if hasattr(doc, 'metadata'):
                 doc.metadata['vector_score'] = round(float(score), 4)
             docs.append(doc)
     elif retrieval_strategy == "hybrid":
-        docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K)
+        docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K, kb_id=kb_id)
     else:
-        scored = vectorstore.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
+        scored = vs.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
         docs = []
         for doc, score in scored:
             if hasattr(doc, 'metadata'):
@@ -1203,9 +1418,13 @@ def rag_query_stateless(question: str,
     answer_text = answer.content if hasattr(answer, 'content') else str(answer)
     return answer_text, sources
 
-def _retrieve_and_build_prompt(question, session_id=None, retrieval_strategy="default",
+def _retrieve_and_build_prompt(question, session_id=None, kb_id="default",
+                               retrieval_strategy="default",
                                pre_retrieval="none", post_retrieval="none", use_history=True):
     """公共检索逻辑，返回 (prompt_text, sources)"""
+    kb_data = kb_manager.get(kb_id)
+    vs = kb_data["vectorstore"]
+
     search_query = question
     if pre_retrieval == "rewrite":
         search_query = rewrite_query(question, session_id) if session_id else rewrite_query(question)
@@ -1214,16 +1433,16 @@ def _retrieve_and_build_prompt(question, session_id=None, retrieval_strategy="de
 
     if pre_retrieval == "hyde":
         hyde_embedding = embeddings.embed_query(search_query)
-        scored = vectorstore.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
+        scored = vs.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
         docs = []
         for doc, score in scored:
             if hasattr(doc, 'metadata'):
                 doc.metadata['vector_score'] = round(float(score), 4)
             docs.append(doc)
     elif retrieval_strategy == "hybrid":
-        docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K)
+        docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K, kb_id=kb_id)
     else:
-        scored = vectorstore.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
+        scored = vs.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
         docs = []
         for doc, score in scored:
             if hasattr(doc, 'metadata'):
@@ -1245,11 +1464,12 @@ def _retrieve_and_build_prompt(question, session_id=None, retrieval_strategy="de
 
     return prompt_text, sources
 
-def rag_query_stream(question, session_id=None, retrieval_strategy="default",
+def rag_query_stream(question, session_id=None, kb_id="default",
+                     retrieval_strategy="default",
                      pre_retrieval="none", post_retrieval="none"):
     """流式 RAG 查询（同步生成器）：先 yield sources JSON，再逐 token yield"""
     prompt_text, sources = _retrieve_and_build_prompt(
-        question, session_id, retrieval_strategy, pre_retrieval, post_retrieval, use_history=True
+        question, session_id, kb_id, retrieval_strategy, pre_retrieval, post_retrieval, use_history=True
     )
     yield json.dumps({"type": "sources", "data": sources}, ensure_ascii=False)
     for chunk in llm.stream(prompt_text):
@@ -1257,11 +1477,12 @@ def rag_query_stream(question, session_id=None, retrieval_strategy="default",
         if content:
             yield json.dumps({"type": "token", "data": content}, ensure_ascii=False)
 
-def rag_query_stateless_stream(question, retrieval_strategy="default",
+def rag_query_stateless_stream(question, kb_id="default",
+                               retrieval_strategy="default",
                                pre_retrieval="none", post_retrieval="none"):
     """无状态流式 RAG 查询（同步生成器）"""
     prompt_text, sources = _retrieve_and_build_prompt(
-        question, None, retrieval_strategy, pre_retrieval, post_retrieval, use_history=False
+        question, None, kb_id, retrieval_strategy, pre_retrieval, post_retrieval, use_history=False
     )
     yield json.dumps({"type": "sources", "data": sources}, ensure_ascii=False)
     for chunk in llm.stream(prompt_text):
@@ -1535,28 +1756,28 @@ async def get_siliconflow_models(x_api_key: Optional[str] = Header(None, alias="
 
 
 @app.post("/init")
-async def init_knowledge_base(force_rebuild: bool = False):
+async def init_knowledge_base(force_rebuild: bool = False, kb_id: str = "default"):
     try:
         global embedding_api_key
         if not embedding_api_key:
             return {"status": "error", "message": "未设置EMBEDDING_API_KEY环境变量"}
 
-        success = init_vectorstore(force_rebuild=force_rebuild)
+        success = await asyncio.to_thread(init_vectorstore, kb_id=kb_id, force_rebuild=force_rebuild)
         if success:
-            message = "知识库重建成功（含BM25索引）" if force_rebuild else "知识库初始化成功"
+            message = f"知识库 '{kb_id}' 重建成功" if force_rebuild else f"知识库 '{kb_id}' 初始化成功"
             return {"status": "success", "message": message}
         else:
-            return {"status": "error", "message": "知识库初始化失败，请确保course_materials文件夹中有支持的文件（PDF/PPTX/DOCX/MD）"}
+            return {"status": "error", "message": f"知识库 '{kb_id}' 初始化失败，请确保材料文件夹中有支持的文件"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 SUPPORTED_EXTENSIONS = {".pdf", ".pptx", ".docx", ".md"}
 
 @app.get("/materials")
-async def list_materials():
-    """列出 course_materials 目录中的文档文件。"""
+async def list_materials(kb_id: str = "default"):
+    """列出指定知识库材料目录中的文档文件。"""
     try:
-        materials_path = os.path.join(base_dir, "course_materials")
+        materials_path = kb_manager.get_materials_path(kb_id)
         if not os.path.isdir(materials_path):
             return {"status": "success", "files": []}
 
@@ -1579,10 +1800,10 @@ async def list_materials():
 
 
 @app.post("/materials/upload")
-async def upload_material(files: List[UploadFile] = File(...)):
-    """上传文档到 course_materials 目录。"""
+async def upload_material(files: List[UploadFile] = File(...), kb_id: str = "default"):
+    """上传文档到指定知识库的材料目录。"""
     try:
-        materials_path = os.path.join(base_dir, "course_materials")
+        materials_path = kb_manager.get_materials_path(kb_id)
         os.makedirs(materials_path, exist_ok=True)
 
         uploaded = []
@@ -1606,31 +1827,31 @@ async def upload_material(files: List[UploadFile] = File(...)):
             return {"status": "partial" if uploaded else "error", "uploaded": uploaded, "errors": errors}
 
         # 上传成功后自动增量索引
-        index_result = index_new_files()
+        index_result = await asyncio.to_thread(index_new_files, kb_id=kb_id)
         return {"status": "success", "uploaded": uploaded, "index": index_result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/materials/index")
-async def index_materials():
+async def index_materials(kb_id: str = "default"):
     """手动触发增量索引，只处理新增或修改的文件。"""
     try:
-        result = index_new_files()
+        result = await asyncio.to_thread(index_new_files, kb_id=kb_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/materials/{filename}")
-async def delete_material(filename: str):
-    """删除 course_materials 目录中的指定文件。"""
+async def delete_material(filename: str, kb_id: str = "default"):
+    """删除指定知识库材料目录中的指定文件。"""
     try:
         filename = os.path.normpath(filename)
         if os.path.dirname(filename) != '':
             raise HTTPException(status_code=400, detail="非法文件名")
 
-        materials_path = os.path.join(base_dir, "course_materials")
+        materials_path = kb_manager.get_materials_path(kb_id)
         fp = os.path.join(materials_path, filename)
         if not os.path.realpath(fp).startswith(os.path.realpath(materials_path) + os.sep):
             raise HTTPException(status_code=400, detail="非法文件名")
@@ -1640,7 +1861,7 @@ async def delete_material(filename: str):
         os.remove(fp)
 
         # 从索引中移除该文件的向量
-        index_result = remove_file_from_index(filename)
+        index_result = await asyncio.to_thread(remove_file_from_index, filename, kb_id)
 
         return {"status": "success", "message": f"已删除: {filename}", "index": index_result}
     except HTTPException:
@@ -1658,15 +1879,17 @@ async def ask_stream(query: Query, background_tasks: BackgroundTasks):
     if not embedding_api_key:
         raise HTTPException(status_code=503, detail="未设置EMBEDDING_API_KEY环境变量")
 
-    if not retriever:
-        if not init_vectorstore():
-            raise HTTPException(status_code=503, detail="向量库未初始化，请先上传文档")
-
+    # 解析 kb_id：优先用请求参数，其次从会话获取
+    kb_id = query.kb_id
     session_id = query.session_id
     if session_id:
         session = get_session(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="会话不存在")
+        if not kb_id:
+            kb_id = session.get("kb_id", "default")
+    if not kb_id:
+        kb_id = "default"
 
     def event_generator():
         full_answer = []
@@ -1674,6 +1897,7 @@ async def ask_stream(query: Query, background_tasks: BackgroundTasks):
             gen = rag_query_stream if session_id else rag_query_stateless_stream
             kwargs = {
                 "question": query.question,
+                "kb_id": kb_id,
                 "retrieval_strategy": query.retrieval_strategy,
                 "pre_retrieval": query.pre_retrieval,
                 "post_retrieval": query.post_retrieval,
@@ -1720,25 +1944,26 @@ async def ask_question(query: Query, background_tasks: BackgroundTasks):
         if not embedding_api_key:
             raise HTTPException(status_code=503, detail="未设置EMBEDDING_API_KEY环境变量")
 
-        if not retriever:
-            print("retriever未初始化，尝试初始化...")
-            if not init_vectorstore():
-                raise HTTPException(status_code=503, detail="向量库未初始化，请先上传文档")
-
+        # 解析 kb_id
+        kb_id = query.kb_id
         session_id = query.session_id
         if session_id:
             session = get_session(session_id)
             if not session:
                 raise HTTPException(status_code=404, detail="会话不存在")
+            if not kb_id:
+                kb_id = session.get("kb_id", "default")
+        if not kb_id:
+            kb_id = "default"
 
         strategy_info = f"retrieval={query.retrieval_strategy}, pre={query.pre_retrieval}, post={query.post_retrieval}"
-        print(f"收到问题: {query.question} (session_id={session_id}, {strategy_info})")
+        print(f"收到问题: {query.question} (kb={kb_id}, session={session_id}, {strategy_info})")
 
         try:
             if session_id:
                 answer, sources = await asyncio.wait_for(
                     asyncio.to_thread(
-                        rag_query, query.question, session_id,
+                        rag_query, query.question, session_id, kb_id,
                         query.retrieval_strategy, query.pre_retrieval, query.post_retrieval
                     ),
                     timeout=180
@@ -1746,7 +1971,7 @@ async def ask_question(query: Query, background_tasks: BackgroundTasks):
             else:
                 answer, sources = await asyncio.wait_for(
                     asyncio.to_thread(
-                        rag_query_stateless, query.question,
+                        rag_query_stateless, query.question, kb_id,
                         query.retrieval_strategy, query.pre_retrieval, query.post_retrieval
                     ),
                     timeout=180
@@ -1789,11 +2014,15 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
     if not embedding_api_key:
         raise HTTPException(status_code=503, detail="未设置EMBEDDING_API_KEY环境变量")
 
-    if not retriever:
-        if not init_vectorstore():
-            raise HTTPException(status_code=503, detail="向量库未初始化，请先上传文档")
-
+    # 解析 kb_id
+    kb_id = request.kb_id
     session_id = request.session_id
+    if session_id:
+        session = get_session(session_id)
+        if session and not kb_id:
+            kb_id = session.get("kb_id", "default")
+    if not kb_id:
+        kb_id = "default"
 
     user_message = ""
     for msg in reversed(request.messages):
@@ -1822,6 +2051,7 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
                 gen = rag_query_stream if session_id else rag_query_stateless_stream
                 kwargs = {
                     "question": user_message,
+                    "kb_id": kb_id,
                     "retrieval_strategy": request.retrieval_strategy,
                     "pre_retrieval": request.pre_retrieval,
                     "post_retrieval": request.post_retrieval,
@@ -1879,7 +2109,7 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
         if session_id:
             answer, _sources = await asyncio.wait_for(
                 asyncio.to_thread(
-                    rag_query, user_message, session_id,
+                    rag_query, user_message, session_id, kb_id,
                     request.retrieval_strategy, request.pre_retrieval, request.post_retrieval
                 ),
                 timeout=180
@@ -1892,6 +2122,9 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
                     history_lines.append(f"{role_label}：{msg.content}")
                 history_text = "### 对话历史：\n" + "\n\n".join(history_lines) + "\n\n"
 
+                kb_data = kb_manager.get(kb_id)
+                vs = kb_data["vectorstore"]
+
                 search_query = user_message
                 if request.pre_retrieval == "rewrite":
                     search_query = rewrite_query(user_message)
@@ -1900,11 +2133,11 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
 
                 if request.pre_retrieval == "hyde":
                     hyde_embedding = embeddings.embed_query(search_query)
-                    docs = vectorstore.similarity_search_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
+                    docs = vs.similarity_search_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
                 elif request.retrieval_strategy == "hybrid":
-                    docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K)
+                    docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K, kb_id=kb_id)
                 else:
-                    docs = retriever.invoke(search_query)
+                    docs = vs.as_retriever(search_kwargs={"k": HYBRID_CANDIDATE_K}).invoke(search_query)
 
                 if request.post_retrieval == "rerank" and reranker:
                     docs = reranker.rerank(user_message, docs, top_n=DEFAULT_TOP_K)
@@ -1921,7 +2154,7 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
             else:
                 answer, _sources = await asyncio.wait_for(
                     asyncio.to_thread(
-                        rag_query_stateless, user_message,
+                        rag_query_stateless, user_message, kb_id,
                         request.retrieval_strategy, request.pre_retrieval, request.post_retrieval
                     ),
                     timeout=180
@@ -1956,10 +2189,12 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
 @app.post("/sessions", response_model=SessionInfo)
 async def create_new_session(body: SessionCreate = None):
     title = body.title if body and body.title else "新对话"
+    kb_id = body.kb_id if body and body.kb_id else "default"
     session_id = str(uuid.uuid4())
-    session = create_session(session_id, title)
+    session = create_session(session_id, title, kb_id)
     return SessionInfo(
         session_id=session["session_id"],
+        kb_id=session["kb_id"],
         title=session["title"],
         created_at=session["created_at"],
         updated_at=session["updated_at"],
@@ -1967,12 +2202,13 @@ async def create_new_session(body: SessionCreate = None):
     )
 
 @app.get("/sessions", response_model=SessionListResponse)
-async def get_all_sessions():
-    sessions = list_sessions()
+async def get_all_sessions(kb_id: Optional[str] = None):
+    sessions = list_sessions(kb_id=kb_id)
     return SessionListResponse(
         sessions=[
             SessionInfo(
                 session_id=s["session_id"],
+                kb_id=s.get("kb_id", "default"),
                 title=s["title"],
                 created_at=s["created_at"],
                 updated_at=s["updated_at"],
@@ -1991,6 +2227,7 @@ async def get_session_info(session_id: str):
     msg_count = get_message_count(session_id)
     return SessionInfo(
         session_id=session["session_id"],
+        kb_id=session.get("kb_id", "default"),
         title=session["title"],
         created_at=session["created_at"],
         updated_at=session["updated_at"],
@@ -2025,11 +2262,58 @@ async def cleanup_sessions_endpoint(max_age_days: int = SESSION_MAX_AGE_DAYS):
     return {"deleted_sessions": deleted, "max_age_days": max_age_days}
 
 # ============================================================
+# 知识库管理 API
+# ============================================================
+
+@app.get("/knowledge-bases")
+async def list_knowledge_bases():
+    return {"knowledge_bases": kb_manager.list_kbs()}
+
+@app.post("/knowledge-bases")
+async def create_knowledge_base(kb: KBCreate):
+    info = kb_manager.create_kb(kb.name, kb.description)
+    return info
+
+@app.get("/knowledge-bases/{kb_id}")
+async def get_knowledge_base(kb_id: str):
+    registry = kb_manager.load_registry()
+    if kb_id not in registry:
+        raise HTTPException(status_code=404, detail=f"知识库 '{kb_id}' 不存在")
+    kbs = kb_manager.list_kbs()
+    for kb in kbs:
+        if kb["id"] == kb_id:
+            return kb
+    return registry[kb_id]
+
+@app.put("/knowledge-bases/{kb_id}")
+async def update_knowledge_base(kb_id: str, kb: KBCreate):
+    if not kb_manager.update_kb(kb_id, name=kb.name, description=kb.description):
+        raise HTTPException(status_code=404, detail=f"知识库 '{kb_id}' 不存在")
+    return {"message": "更新成功"}
+
+@app.delete("/knowledge-bases/{kb_id}")
+async def delete_knowledge_base(kb_id: str):
+    if kb_id == "default":
+        raise HTTPException(status_code=400, detail="不能删除默认知识库")
+    if not kb_manager.delete_kb(kb_id):
+        raise HTTPException(status_code=404, detail=f"知识库 '{kb_id}' 不存在")
+    return {"message": f"知识库 '{kb_id}' 已删除"}
+
+@app.post("/knowledge-bases/{kb_id}/rebuild")
+async def rebuild_knowledge_base(kb_id: str):
+    result = await asyncio.to_thread(init_vectorstore, kb_id=kb_id, force_rebuild=True)
+    if result:
+        return {"message": f"知识库 '{kb_id}' 重建成功"}
+    raise HTTPException(status_code=500, detail="知识库重建失败")
+
+# ============================================================
 # 启动
 # ============================================================
 
+init_default_kb()
 init_db()
-init_vectorstore()
+init_shared_models()
+kb_manager = KBManager(max_loaded=2)
 
 if __name__ == "__main__":
     print("=" * 50)
@@ -2039,8 +2323,6 @@ if __name__ == "__main__":
     print(f"Embedding: {embedding_model_name} @ {embedding_base_url}")
     print(f"Reranker: {RERANKER_MODEL} @ {reranker_base_url}")
     print(f"数据库路径: {DB_PATH}")
-    print(f"最大历史轮数: {MAX_HISTORY_EXCHANGES}")
-    print(f"会话过期天数: {SESSION_MAX_AGE_DAYS}")
-    print(f"混合检索权重: 向量={VECTOR_WEIGHT}, BM25={BM25_WEIGHT}")
+    print(f"知识库数量: {len(kb_manager.list_kbs())}")
     print("=" * 50)
     uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")

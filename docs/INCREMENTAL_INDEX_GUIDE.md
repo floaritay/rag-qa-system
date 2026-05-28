@@ -13,7 +13,7 @@
         │
         ▼
 ┌───────────────────────────────────────────────┐
-│  扫描 course_materials/                        │
+│  扫描 knowledge_bases/<kb_id>/materials/        │
 │  对比 manifest.json 中已记录的文件 mtime        │
 │  筛选出新增或修改的文件                         │
 └──────────────────┬────────────────────────────┘
@@ -59,7 +59,7 @@
 
 ### manifest.json
 
-增量索引的核心是 `course_knowledge_base/manifest.json`，记录每个已索引文件的修改时间和分块数：
+增量索引的核心是 `knowledge_bases/<kb_id>/manifest.json`，记录每个已索引文件的修改时间和分块数：
 
 ```json
 {

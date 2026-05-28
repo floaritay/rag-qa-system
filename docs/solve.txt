@@ -434,3 +434,27 @@
 
 ### 主要改动
 - `backend/main_siliconflow_rag.py` L254：`_resolve_startup_key()` 去掉 `or siliconflow_api_key` 回退
+
+---
+
+### 问题：重建知识库时上传的文档被删除
+**日期**：2026-05-26
+
+**现象**：
+- 新建知识库后上传文件成功，但看不到上传的文件
+- 点击"重建索引"失败，返回 500 错误
+- 上传的文件从磁盘上消失
+
+**分析**：
+1. `init_vectorstore()` 的 `force_rebuild` 分支使用 `shutil.rmtree(kb_path)` 删除整个知识库目录，包括 `materials/` 子目录
+2. 删除后再调用 `load_documents(materials_path)` 加载文档，但目录已被删除，返回空列表
+3. 导致"未找到文档，向量库未初始化"，重建失败
+4. 同时存在 `chardet 7.x` 与 `langchain TextLoader` 的兼容性问题（`FileEncoding.__new__()` 参数不兼容）
+
+**解决方案**：
+1. `init_vectorstore()` 的 force_rebuild 分支改为只删除索引文件（index.faiss, index.pkl, bm25_index.pkl, manifest.json），保留 materials 目录
+2. 降级 chardet 到 5.x 版本（`chardet>=5.0.0,<6.0.0`），并在 requirements.txt 中固定版本范围
+
+### 主要改动
+- `backend/main_siliconflow_rag.py` L1119-1125：`shutil.rmtree(kb_path)` 改为逐个删除索引文件
+- `backend/requirements.txt`：新增 `chardet>=5.0.0,<6.0.0`

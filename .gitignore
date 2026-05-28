@@ -1,14 +1,15 @@
 # 忽略向量库文件夹
-course_knowledge_base/
+knowledge_bases/
 # 忽略环境变量配置文件（若有）
 .env
-# 忽略PDF源文件
-course_materials/
 #
 review/
 
 style.md
 style.txt
 .trae/
+CLAUDE.md
+AGENT.md
+
 program.md
 backend/sessions.db

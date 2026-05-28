@@ -10,11 +10,27 @@ echo  ========================================
 echo         Personal Knowledge Base
 echo  ========================================
 echo.
-echo  Starting services...
-echo  The browser will open automatically.
+
+:: Kill any existing processes on ports 8080 and 8001
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8080.*LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8001.*LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
+
+echo  [1/2] Starting web server on :8080 ...
+cd /d "%ROOT%"
+start /b python -m http.server 8080 --directory web
+
+timeout /t 2 /nobreak >nul
+
+echo  [2/2] Starting backend on :8001 ...
+echo.
+echo  ========================================
+echo   Press Ctrl+C to stop all services.
+echo   Browser will open shortly...
+echo  ========================================
 echo.
 
-start "Personal Knowledge Base" /d "%ROOT%" cmd /k "start /b python -m http.server 8080 --directory web & python backend\main_siliconflow_rag.py"
+timeout /t 4 /nobreak >nul
+start "" "http://localhost:8080"
 
-timeout /t 6 /nobreak >nul
-start http://localhost:8080
+:: Run backend in foreground (Ctrl+C stops it; background HTTP server shares the console)
+python backend\main_siliconflow_rag.py

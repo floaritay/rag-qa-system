@@ -5,6 +5,7 @@ const API_URL = 'http://127.0.0.1:8001';
 // ============================================================
 let isProcessing = false;
 let currentSessionId = null;
+let currentKbId = 'default';
 
 // ============================================================
 // DOM
@@ -29,7 +30,6 @@ const dom = {
     modelSettingsBtn: $('modelSettingsBtn'),
     modelSettingsOverlay: $('modelSettingsOverlay'),
     modelSettingsClose: $('modelSettingsClose'),
-    rebuildBtn: $('rebuildBtn'),
     retrievalStrategySelect: $('retrievalStrategySelect'),
     preRetrievalSelect: $('preRetrievalSelect'),
     postRetrievalSelect: $('postRetrievalSelect'),
@@ -56,6 +56,12 @@ const dom = {
     kbFileList: $('kbFileList'),
     kbFileInput: $('kbFileInput'),
     kbUploadArea: $('kbUploadArea'),
+    kbSelect: $('kbSelect'),
+    kbSelectMenu: $('kbSelectMenu'),
+    kbList: $('kbList'),
+    kbNameInput: $('kbNameInput'),
+    kbCreateBtn: $('kbCreateBtn'),
+    kbFilesTitle: $('kbFilesTitle'),
 };
 
 // ============================================================
@@ -134,15 +140,27 @@ function escapeHtml(text) {
 // ============================================================
 // Toast
 // ============================================================
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', persistent = false) {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
+    if (persistent) {
+        toast.dataset.persistent = 'true';
+    }
     toast.textContent = message;
     dom.toastContainer.appendChild(toast);
-    setTimeout(() => {
-        toast.classList.add('removing');
-        setTimeout(() => toast.remove(), 250);
-    }, 3000);
+    if (!persistent) {
+        setTimeout(() => {
+            toast.classList.add('removing');
+            setTimeout(() => toast.remove(), 250);
+        }, 3000);
+    }
+}
+
+function removeLoadingToast() {
+    dom.toastContainer.querySelectorAll('[data-persistent="true"]').forEach(el => {
+        el.classList.add('removing');
+        setTimeout(() => el.remove(), 250);
+    });
 }
 
 // ============================================================
@@ -196,7 +214,7 @@ function closeSidebar() {
 // ============================================================
 async function loadSessionList() {
     try {
-        const res = await fetch(`${API_URL}/sessions`);
+        const res = await fetch(`${API_URL}/sessions?kb_id=${encodeURIComponent(currentKbId)}`);
         if (!res.ok) return;
         const data = await res.json();
         renderSessionList(data.sessions || []);
@@ -283,7 +301,7 @@ async function createNewSession() {
         const res = await fetch(`${API_URL}/sessions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: '新对话' }),
+            body: JSON.stringify({ title: '新对话', kb_id: currentKbId }),
         });
         if (!res.ok) return;
         const session = await res.json();
@@ -346,29 +364,6 @@ async function deleteSession(sessionId) {
 // ============================================================
 // Welcome Screen
 // ============================================================
-function showWelcome() {
-    dom.chatMessages.innerHTML = `
-        <div class="welcome" id="welcome">
-            <div class="welcome-glow"></div>
-            <div class="welcome-icon">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                    <path d="M2 17l10 5 10-5"/>
-                    <path d="M2 12l10 5 10-5"/>
-                </svg>
-            </div>
-            <h2>个人知识库</h2>
-            <p>基于 RAG 技术，精准检索文档，为您解答专业问题</p>
-            <div class="welcome-chips">
-                <button class="chip" data-question="这门课程的主要内容是什么？">课程主要内容</button>
-                <button class="chip" data-question="请总结一下最近讲的知识点">知识点总结</button>
-                <button class="chip" data-question="有哪些重要的概念需要掌握？">重要概念</button>
-            </div>
-        </div>
-    `;
-    bindChipClicks();
-}
-
 function bindChipClicks() {
     document.querySelectorAll('.chip[data-question]').forEach(chip => {
         chip.addEventListener('click', () => {
@@ -595,7 +590,7 @@ async function askQuestion(question) {
                 const sessRes = await fetch(`${API_URL}/sessions`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title: '新对话' }),
+                    body: JSON.stringify({ title: '新对话', kb_id: currentKbId }),
                 });
                 if (sessRes.ok) {
                     const sess = await sessRes.json();
@@ -607,7 +602,7 @@ async function askQuestion(question) {
             }
         }
 
-        const body = { question };
+        const body = { question, kb_id: currentKbId };
         if (currentSessionId) body.session_id = currentSessionId;
         body.retrieval_strategy = getSelectValue('retrievalStrategySelect');
         body.pre_retrieval = getSelectValue('preRetrievalSelect');
@@ -692,14 +687,12 @@ async function askQuestion(question) {
 // ============================================================
 // Rebuild Knowledge Base
 // ============================================================
-async function rebuildKnowledgeBase() {
-    dom.rebuildBtn.disabled = true;
-    const label = dom.rebuildBtn.querySelector('span');
-    const originalText = label.textContent;
-    label.textContent = '重建中...';
-
+async function rebuildKnowledgeBase(kbId) {
+    kbId = kbId || currentKbId;
+    showToast('重建中...', 'info', true);
     try {
-        const res = await fetch(`${API_URL}/init?force_rebuild=true`, { method: 'POST' });
+        const res = await fetch(`${API_URL}/knowledge-bases/${encodeURIComponent(kbId)}/rebuild`, { method: 'POST' });
+        removeLoadingToast();
         if (res.ok) {
             const result = await res.json();
             showToast(result.message || '知识库重建成功', 'success');
@@ -708,11 +701,9 @@ async function rebuildKnowledgeBase() {
             showToast(`重建失败：${err.detail || '未知错误'}`, 'error');
         }
     } catch {
+        removeLoadingToast();
         showToast('无法连接到后端服务', 'error');
     }
-
-    label.textContent = originalText;
-    dom.rebuildBtn.disabled = false;
 }
 
 // ============================================================
@@ -727,7 +718,9 @@ function formatFileSize(bytes) {
 }
 
 function openKbPanel() {
+    console.log('[KB] openKbPanel called');
     dom.kbOverlay.classList.add('open');
+    loadKnowledgeBasesForPanel();
     loadMaterialFiles();
 }
 
@@ -735,12 +728,231 @@ function closeKbPanel() {
     dom.kbOverlay.classList.remove('open');
 }
 
+// ============================================================
+// Knowledge Base Management
+// ============================================================
+async function loadKnowledgeBases() {
+    try {
+        console.log('[KB] loadKnowledgeBases: fetching...');
+        const res = await fetch(`${API_URL}/knowledge-bases`);
+        console.log('[KB] loadKnowledgeBases: status', res.status);
+        if (!res.ok) return;
+        const data = await res.json();
+        console.log('[KB] loadKnowledgeBases: data', data);
+        renderKbSelector(data.knowledge_bases || []);
+    } catch (e) {
+        console.error('[KB] loadKnowledgeBases error:', e);
+    }
+}
+
+function renderKbSelector(kbs) {
+    dom.kbSelectMenu.innerHTML = '';
+    kbs.forEach(kb => {
+        const opt = document.createElement('div');
+        opt.className = 'custom-select-option' + (kb.id === currentKbId ? ' selected' : '');
+        opt.dataset.value = kb.id;
+        opt.innerHTML = `<span class="option-label">${escapeHtml(kb.name)}</span>`;
+        opt.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dom.kbSelect.classList.remove('open');
+            switchKnowledgeBase(kb.id);
+        });
+        dom.kbSelectMenu.appendChild(opt);
+    });
+    // Update trigger label
+    const current = kbs.find(k => k.id === currentKbId);
+    const label = dom.kbSelect.querySelector('.custom-select-label');
+    if (label) label.textContent = current ? current.name : '默认知识库';
+    dom.kbSelect.dataset.value = currentKbId;
+}
+
+async function switchKnowledgeBase(kbId) {
+    currentKbId = kbId;
+    currentSessionId = null;
+    dom.kbSelect.dataset.value = kbId;
+    // Close dropdown
+    dom.kbSelect.classList.remove('open');
+    // Reload sessions for this KB
+    await loadSessionList();
+    // Reload KB selector to update selected state
+    await loadKnowledgeBases();
+    // Show welcome screen
+    showWelcome();
+}
+
+function showWelcome() {
+    dom.chatMessages.innerHTML = '';
+    const welcome = document.createElement('div');
+    welcome.className = 'welcome';
+    welcome.id = 'welcome';
+    welcome.innerHTML = `
+        <div class="welcome-glow"></div>
+        <div class="welcome-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
+            </svg>
+        </div>
+        <h2>个人知识库</h2>
+        <p>基于 RAG 技术，精准检索文档，为您解答专业问题</p>
+        <div class="welcome-chips">
+            <button class="chip" data-question="这门课程的主要内容是什么？">课程主要内容</button>
+            <button class="chip" data-question="请总结一下最近讲的知识点">知识点总结</button>
+            <button class="chip" data-question="有哪些重要的概念需要掌握？">重要概念</button>
+        </div>
+    `;
+    dom.chatMessages.appendChild(welcome);
+    dom.topbarTitle.textContent = '个人知识库';
+    // Re-bind chip clicks
+    welcome.querySelectorAll('.chip').forEach(chip => {
+        chip.addEventListener('click', () => askQuestion(chip.dataset.question));
+    });
+}
+
+async function loadKnowledgeBasesForPanel() {
+    try {
+        console.log('[KB] loadKnowledgeBasesForPanel: fetching...');
+        const res = await fetch(`${API_URL}/knowledge-bases`);
+        console.log('[KB] loadKnowledgeBasesForPanel: status', res.status);
+        if (!res.ok) return;
+        const data = await res.json();
+        console.log('[KB] loadKnowledgeBasesForPanel: data', data);
+        renderKbList(data.knowledge_bases || []);
+    } catch (e) {
+        console.error('[KB] loadKnowledgeBasesForPanel error:', e);
+    }
+}
+
+function renderKbList(kbs) {
+    console.log('[KB] renderKbList:', kbs.length, 'items');
+    dom.kbList.innerHTML = '';
+    kbs.forEach(kb => {
+        const item = document.createElement('div');
+        item.className = 'kb-list-item' + (kb.id === currentKbId ? ' active' : '');
+        item.dataset.kbId = kb.id;
+
+        const info = document.createElement('div');
+        info.className = 'kb-list-item-info';
+        info.innerHTML = `
+            <div class="kb-list-item-name">${escapeHtml(kb.name)}</div>
+            <div class="kb-list-item-meta">${kb.file_count} 个文档</div>
+        `;
+
+        const actions = document.createElement('div');
+        actions.className = 'kb-actions';
+
+        const rebuildBtn = document.createElement('button');
+        rebuildBtn.className = 'btn-icon';
+        rebuildBtn.title = '重建索引';
+        rebuildBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+        rebuildBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            rebuildKnowledgeBase(kb.id);
+        });
+
+        actions.appendChild(rebuildBtn);
+
+        if (kb.id !== 'default') {
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'btn-icon';
+            deleteBtn.title = '删除知识库';
+            deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                deleteKnowledgeBase(kb.id, kb.name);
+            });
+            actions.appendChild(deleteBtn);
+        }
+
+        item.append(info, actions);
+        item.addEventListener('click', () => selectKbInPanel(kb.id));
+        dom.kbList.appendChild(item);
+    });
+}
+
+function selectKbInPanel(kbId) {
+    currentKbId = kbId;
+    currentSessionId = null;
+    // Update active state in list
+    dom.kbList.querySelectorAll('.kb-list-item').forEach(el => el.classList.remove('active'));
+    const activeItem = dom.kbList.querySelector(`[data-kb-id="${kbId}"]`);
+    if (activeItem) activeItem.classList.add('active');
+    // Update sidebar selector label
+    const label = dom.kbSelect.querySelector('.custom-select-label');
+    const name = activeItem ? activeItem.querySelector('.kb-list-item-name')?.textContent : kbId;
+    if (label && name) label.textContent = name;
+    dom.kbSelect.dataset.value = kbId;
+    // Reload sessions and files
+    loadSessionList();
+    loadMaterialFiles();
+    showWelcome();
+}
+
+async function createKnowledgeBase() {
+    const name = dom.kbNameInput.value.trim();
+    if (!name) {
+        showToast('请输入知识库名称', 'error');
+        return;
+    }
+    try {
+        const res = await fetch(`${API_URL}/knowledge-bases`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+        });
+        if (res.ok) {
+            const kb = await res.json();
+            dom.kbNameInput.value = '';
+            showToast(`知识库 "${name}" 创建成功`, 'success');
+            currentKbId = kb.id;
+            await loadKnowledgeBases();
+            await loadKnowledgeBasesForPanel();
+            await loadMaterialFiles();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            showToast(`创建失败: ${err.detail || '未知错误'}`, 'error');
+        }
+    } catch {
+        showToast('创建失败: 无法连接到后端', 'error');
+    }
+}
+
+async function deleteKnowledgeBase(kbId, kbName) {
+    if (!confirm(`确认删除知识库 "${kbName}"？此操作不可恢复。`)) return;
+    try {
+        const res = await fetch(`${API_URL}/knowledge-bases/${encodeURIComponent(kbId)}`, { method: 'DELETE' });
+        if (res.ok) {
+            showToast(`已删除: ${kbName}`, 'success');
+            if (currentKbId === kbId) {
+                currentKbId = 'default';
+                currentSessionId = null;
+                showWelcome();
+            }
+            await loadKnowledgeBases();
+            await loadKnowledgeBasesForPanel();
+            await loadSessionList();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            showToast(`删除失败: ${err.detail || '未知错误'}`, 'error');
+        }
+    } catch {
+        showToast('删除失败: 无法连接到后端', 'error');
+    }
+}
+
 async function loadMaterialFiles() {
     try {
-        const res = await fetch(`${API_URL}/materials`);
+        const res = await fetch(`${API_URL}/materials?kb_id=${encodeURIComponent(currentKbId)}`);
         if (res.ok) {
             const result = await res.json();
             renderFileList(result.files || []);
+            // Update title
+            if (dom.kbFilesTitle) {
+                const label = dom.kbSelect.querySelector('.custom-select-label');
+                const kbName = label ? label.textContent : currentKbId;
+                dom.kbFilesTitle.textContent = `文档列表 — ${kbName}`;
+            }
         } else {
             dom.kbFileList.innerHTML = '<div class="kb-empty">加载失败</div>';
         }
@@ -794,15 +1006,16 @@ function renderFileList(files) {
 
 async function uploadFiles(fileList) {
     if (!fileList.length) return;
+    showToast('上传中...', 'info', true);
     const formData = new FormData();
     for (const file of fileList) formData.append('files', file);
 
     try {
-        const res = await fetch(`${API_URL}/materials/upload`, { method: 'POST', body: formData });
+        const res = await fetch(`${API_URL}/materials/upload?kb_id=${encodeURIComponent(currentKbId)}`, { method: 'POST', body: formData });
         const result = await res.json();
+        removeLoadingToast();
         if (result.status === 'success') {
             showToast(`上传成功: ${result.uploaded.join(', ')}`, 'success');
-            if (confirm('上传成功！是否立即重建知识库以索引新文件？')) rebuildKnowledgeBase();
         } else if (result.status === 'partial') {
             showToast(`部分上传成功: ${result.uploaded.join(', ')}`, 'info');
             if (result.errors) result.errors.forEach(e => showToast(e, 'error'));
@@ -811,6 +1024,7 @@ async function uploadFiles(fileList) {
         }
         loadMaterialFiles();
     } catch {
+        removeLoadingToast();
         showToast('上传失败: 无法连接到后端', 'error');
     }
 }
@@ -818,11 +1032,10 @@ async function uploadFiles(fileList) {
 async function deleteMaterial(filename) {
     if (!confirm(`确认删除 "${filename}"？`)) return;
     try {
-        const res = await fetch(`${API_URL}/materials/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        const res = await fetch(`${API_URL}/materials/${encodeURIComponent(filename)}?kb_id=${encodeURIComponent(currentKbId)}`, { method: 'DELETE' });
         if (res.ok) {
             showToast(`已删除: ${filename}`, 'success');
             loadMaterialFiles();
-            if (confirm('文件已删除！是否立即重建知识库以更新索引？')) rebuildKnowledgeBase();
         } else {
             const err = await res.json().catch(() => ({}));
             showToast(`删除失败: ${err.detail || '未知错误'}`, 'error');
@@ -1210,12 +1423,19 @@ dom.modelSettingsOverlay.addEventListener('click', (e) => {
     if (e.target === dom.modelSettingsOverlay) closeModelSettings();
 });
 
-dom.rebuildBtn.addEventListener('click', rebuildKnowledgeBase);
 dom.saveConfigBtn.addEventListener('click', saveConfig);
 
 // Knowledge Base Management
-dom.kbManageBtn.addEventListener('click', openKbPanel);
+console.log('[KB] Binding kbManageBtn click handler, element:', dom.kbManageBtn);
+dom.kbManageBtn.addEventListener('click', () => {
+    console.log('[KB] kbManageBtn clicked!');
+    openKbPanel();
+});
 dom.kbClose.addEventListener('click', closeKbPanel);
+if (dom.kbCreateBtn) dom.kbCreateBtn.addEventListener('click', createKnowledgeBase);
+if (dom.kbNameInput) dom.kbNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') createKnowledgeBase();
+});
 dom.kbOverlay.addEventListener('click', (e) => {
     if (e.target === dom.kbOverlay) closeKbPanel();
 });
@@ -1250,8 +1470,14 @@ document.addEventListener('keydown', (e) => {
 // Init
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('[KB] DOMContentLoaded fired');
+    console.log('[KB] kbManageBtn:', dom.kbManageBtn);
+    console.log('[KB] kbOverlay:', dom.kbOverlay);
+    console.log('[KB] kbList:', dom.kbList);
+    console.log('[KB] kbSelect:', dom.kbSelect);
     dom.questionInput.focus();
     checkHealth();
+    loadKnowledgeBases();
     loadSessionList();
     bindChipClicks();
     updateMenuArrow();

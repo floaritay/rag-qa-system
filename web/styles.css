@@ -1766,6 +1766,11 @@ body {
     max-width: 320px;
 }
 
+.toast[data-persistent="true"] {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, var(--bg-elevated), var(--accent-dim));
+}
+
 .toast.success {
     border-color: rgba(74, 222, 128, 0.3);
     background: linear-gradient(135deg, var(--bg-elevated), rgba(74, 222, 128, 0.05));
@@ -1885,4 +1890,163 @@ body {
 
 .sources-panel-slot:empty {
     display: none;
+}
+
+/* ============================================================
+   Knowledge Base Selector (Sidebar)
+   ============================================================ */
+.kb-selector {
+    padding: 0 12px;
+    margin-bottom: 8px;
+    position: relative;
+    z-index: 20;
+}
+
+.kb-selector .custom-select {
+    width: 100%;
+}
+
+.kb-selector .custom-select-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    color: var(--text-primary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color var(--t-fast);
+}
+
+.kb-selector .custom-select-trigger:hover {
+    border-color: var(--accent);
+}
+
+.kb-selector .custom-select-trigger svg:first-child {
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.kb-selector .custom-select-label {
+    flex: 1;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kb-selector .custom-select-menu {
+    left: 0;
+    right: 0;
+    min-width: 100%;
+    z-index: 30;
+}
+
+/* ============================================================
+   Knowledge Base Management Panel
+   ============================================================ */
+.kb-list-section {
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.kb-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.kb-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: background var(--t-fast);
+}
+
+.kb-list-item:hover {
+    background: var(--bg-hover);
+}
+
+.kb-list-item.active {
+    background: var(--accent-dim);
+    border-left: 3px solid var(--accent);
+}
+
+.kb-list-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.kb-list-item-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kb-list-item-meta {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}
+
+.kb-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.kb-actions .btn-icon {
+    padding: 4px;
+    border-radius: var(--r-sm);
+    color: var(--text-secondary);
+    transition: color var(--t-fast), background var(--t-fast);
+}
+
+.kb-actions .btn-icon:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.kb-create-form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.kb-create-form .setting-input {
+    flex: 1;
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+.btn-accent {
+    padding: 6px 14px;
+    background: var(--accent);
+    color: var(--text-inverse);
+    border: none;
+    border-radius: var(--r-sm);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--t-fast);
+    white-space: nowrap;
+}
+
+.btn-accent:hover {
+    background: var(--accent-hover);
+}
+
+.kb-files-section {
+    /* Container for the file management area */
 }

@@ -34,8 +34,12 @@
 │   ├── app.js                          # 交互逻辑
 │   └── styles.css                      # 样式
 ├── docs/                               # 文档目录
-├── course_materials/                   # 文档存放目录（不存在请手动创建）
-├── course_knowledge_base/              # 向量库 + BM25 索引（自动生成）
+├── knowledge_bases/                    # 多知识库数据（自动生成，gitignored）
+│   ├── registry.json                   # 知识库注册表
+│   └── default/                        # 默认知识库
+│       ├── index.faiss / index.pkl     # FAISS 向量索引
+│       ├── bm25_index.pkl              # BM25 关键词索引
+│       └── materials/                  # 文档存放目录
 ├── start.bat                           # 一键启动脚本
 └── README.md
 ```
@@ -83,7 +87,7 @@ EMBEDDING_MODEL=BAAI/bge-m3
 
 4. **准备文档资料**
 
-将文档（PDF/PPTX/DOCX/MD）放入 `course_materials` 文件夹（如不存在请手动创建）。
+通过前端"知识库管理"面板上传文档（PDF/PPTX/DOCX/MD），或直接放入 `knowledge_bases/default/materials/` 目录后重建索引。支持多知识库，可按课程或主题创建独立知识库。
 
 5. **启动服务**
 

@@ -19,7 +19,7 @@
 
 确保：
 - 已在 `.env` 文件中设置 API 密钥
-- `course_knowledge_base` 目录存在且包含有效向量库
+- `knowledge_bases/default` 目录存在且包含有效向量库
 - 已安装所有依赖（在 `backend/requirements.txt` 中）
 
 ### 2. 设置环境变量
