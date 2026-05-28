@@ -6,6 +6,14 @@
 
 个人知识库是一个 AI 驱动的问答系统，能够从个人文档（PDF/PPTX/DOCX/MD）中检索相关信息并生成准确回答。系统采用 FastAPI + LangChain 构建 RAG 服务，支持混合检索、查询优化、重排序等高级功能，兼容 OpenAI  API，同时支持接入 Open WebUI 等客户端。
 
+## 在线 Demo
+
+**[https://floaritay.github.io/rag-qa-system/](https://floaritay.github.io/rag-qa-system/)**
+
+纯静态页面，无需后端，使用模拟数据展示完整的 RAG 问答交互流程（流式输出、来源引用、会话管理、知识库切换等）。适合快速了解产品形态。
+
+> 源码位于 `demo/` 目录，详见 [Demo 演示指南](./docs/DEMO_GUIDE.md)。
+
 ## 技术栈
 
 | 组件     | 技术选型                     |
@@ -33,6 +41,7 @@
 │   ├── index.html                      # 页面结构
 │   ├── app.js                          # 交互逻辑
 │   └── styles.css                      # 样式
+├── demo/                               # 静态 Demo（Mock 数据，可直接部署到 GitHub Pages）
 ├── docs/                               # 文档目录
 ├── knowledge_bases/                    # 多知识库数据（自动生成，gitignored）
 │   ├── registry.json                   # 知识库注册表
@@ -213,6 +222,7 @@ python backend/evaluate.py
 
 ## 详细文档
 
+- [Demo 演示指南](./docs/DEMO_GUIDE.md)
 - [部署指南](./docs/DEPLOYMENT_GUIDE.md)
 - [评估指南](./docs/EVALUATION_GUIDE.md)
 - [RAG 优化指南](./docs/RAG_OPTIMIZATION_GUIDE.md)

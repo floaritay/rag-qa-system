@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人知识库 (Demo)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=3">
+</head>
+<body>
+    <div class="app">
+        <!-- 侧边栏 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                            <path d="M2 17l10 5 10-5"/>
+                            <path d="M2 12l10 5 10-5"/>
+                        </svg>
+                    </div>
+                    <span class="logo-text">知识库</span>
+                </div>
+            </div>
+
+            <!-- 知识库选择器 -->
+            <div class="kb-selector" id="kbSelector">
+                <div class="custom-select" id="kbSelect" data-value="default">
+                    <button class="custom-select-trigger" type="button">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span class="custom-select-label">默认知识库</span>
+                        <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                    </button>
+                    <div class="custom-select-menu" id="kbSelectMenu">
+                        <!-- 动态填充 -->
+                    </div>
+                </div>
+            </div>
+
+            <button class="new-chat-btn" id="newChatBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                <span>新建对话</span>
+            </button>
+
+            <div class="session-list" id="sessionList">
+                <!-- 动态填充 -->
+            </div>
+
+            <div class="sidebar-footer">
+                <button class="sidebar-footer-btn" id="kbManageBtn" title="知识库管理">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    <span>知识库管理</span>
+                </button>
+                <button class="sidebar-footer-btn" id="modelSettingsBtn" title="模型设置">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                        <line x1="8" y1="21" x2="16" y2="21"/>
+                        <line x1="12" y1="17" x2="12" y2="21"/>
+                    </svg>
+                    <span>模型设置</span>
+                </button>
+                <button class="sidebar-footer-btn" id="settingsBtn" title="检索策略设置">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    <span>检索策略</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main">
+            <!-- 顶部栏 -->
+            <header class="topbar">
+                <button class="btn-icon menu-btn" id="menuBtn" title="切换侧边栏">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"/>
+                    </svg>
+                </button>
+                <div class="topbar-title" id="topbarTitle">个人知识库 (Demo)</div>
+                <div class="topbar-status" id="healthIndicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">检查中...</span>
+                </div>
+            </header>
+
+            <!-- 聊天区域 -->
+            <div class="chat" id="chat">
+                <div class="chat-messages" id="chatMessages">
+                    <!-- 欢迎页 -->
+                    <div class="welcome" id="welcome">
+                        <div class="welcome-glow"></div>
+                        <div class="welcome-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                                <path d="M2 17l10 5 10-5"/>
+                                <path d="M2 12l10 5 10-5"/>
+                            </svg>
+                        </div>
+                        <h2>个人知识库 <span style="font-size:0.5em;opacity:0.6;vertical-align:middle;">Demo</span></h2>
+                        <p>基于 RAG 技术，精准检索文档，为您解答专业问题</p>
+                        <p style="font-size:0.8em;opacity:0.5;margin-top:-8px;">当前为演示模式，使用模拟数据展示完整交互流程</p>
+                        <div class="welcome-chips">
+                            <button class="chip" data-question="这门课程的主要内容是什么？">课程主要内容</button>
+                            <button class="chip" data-question="请总结一下最近讲的知识点">知识点总结</button>
+                            <button class="chip" data-question="有哪些重要的概念需要掌握？">重要概念</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 输入区域 -->
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <textarea
+                        id="questionInput"
+                        placeholder="输入您的问题..."
+                        rows="1"
+                    ></textarea>
+                    <button class="send-btn" id="sendBtn" disabled>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"/>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="input-hint">Enter 发送，Shift + Enter 换行</div>
+            </div>
+        </main>
+
+        <!-- 模型设置面板 -->
+        <div class="settings-overlay" id="modelSettingsOverlay">
+            <div class="settings-panel" id="modelSettingsPanel">
+                <div class="settings-header">
+                    <h3>模型设置</h3>
+                    <button class="btn-icon" id="modelSettingsClose">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="settings-body">
+                    <!-- 硅基流动 API Key（共享） -->
+                    <div class="sf-key-section">
+                        <div class="setting-group">
+                            <label for="sfApiKey">硅基流动 API Key</label>
+                            <div class="input-with-toggle">
+                                <input type="password" class="setting-input" id="sfApiKey" placeholder="输入 SiliconFlow API Key">
+                                <button class="btn-icon toggle-key-btn" type="button" title="显示/隐藏">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                </button>
+                            </div>
+                            <div class="setting-hint">在 <a href="https://cloud.siliconflow.cn/account/ak" target="_blank" rel="noopener">siliconflow.cn</a> 获取 API Key，选择硅基流动模型时共用此 Key</div>
+                            <div class="setting-hint">模型列表来自硅基流动 API，包含免费和付费模型，请在 <a href="https://siliconflow.cn/pricing" target="_blank" rel="noopener">siliconflow.cn/pricing</a> 确认定价</div>
+                        </div>
+                    </div>
+
+                    <!-- LLM -->
+                    <div class="settings-section-title">
+                        LLM 模型
+                        <div class="mini-toggle" data-target="llm">
+                            <button class="mini-toggle-btn active" data-value="siliconflow">硅基流动</button>
+                            <button class="mini-toggle-btn" data-value="custom">自定义</button>
+                        </div>
+                    </div>
+                    <div class="model-section" id="sectionLlm">
+                        <div class="model-sf" data-provider="siliconflow">
+                            <div class="setting-group">
+                                <div class="custom-select" id="sfLlmModelSelect" data-value="">
+                                    <button class="custom-select-trigger" type="button">
+                                        <span class="custom-select-label">加载中...</span>
+                                        <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                                    </button>
+                                    <div class="custom-select-menu"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="model-custom" data-provider="custom" style="display:none">
+                            <div class="setting-group">
+                                <label for="cfgLlmModel">模型名称</label>
+                                <input type="text" class="setting-input" id="cfgLlmModel" placeholder="例如 Qwen/Qwen3-8B">
+                            </div>
+                            <div class="setting-group">
+                                <label for="cfgLlmBaseUrl">Base URL</label>
+                                <input type="text" class="setting-input" id="cfgLlmBaseUrl" placeholder="OpenAI 兼容 API 地址">
+                            </div>
+                            <div class="setting-group">
+                                <label for="cfgLlmApiKey">API Key</label>
+                                <div class="input-with-toggle">
+                                    <input type="password" class="setting-input" id="cfgLlmApiKey" placeholder="留空则不修改">
+                                    <button class="btn-icon toggle-key-btn" type="button" title="显示/隐藏">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Embedding -->
+                    <div class="settings-section-title">
+                        Embedding 模型
+                        <div class="mini-toggle" data-target="embedding">
+                            <button class="mini-toggle-btn active" data-value="siliconflow">硅基流动</button>
+                            <button class="mini-toggle-btn" data-value="custom">自定义</button>
+                        </div>
+                    </div>
+                    <div class="model-section" id="sectionEmbedding">
+                        <div class="model-sf" data-provider="siliconflow">
+                            <div class="setting-group">
+                                <div class="custom-select" id="sfEmbModelSelect" data-value="">
+                                    <button class="custom-select-trigger" type="button">
+                                        <span class="custom-select-label">加载中...</span>
+                                        <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                                    </button>
+                                    <div class="custom-select-menu"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="model-custom" data-provider="custom" style="display:none">
+                            <div class="setting-group">
+                                <label for="cfgEmbModel">模型名称</label>
+                                <input type="text" class="setting-input" id="cfgEmbModel" placeholder="例如 BAAI/bge-m3">
+                            </div>
+                            <div class="setting-group">
+                                <label for="cfgEmbBaseUrl">Base URL</label>
+                                <input type="text" class="setting-input" id="cfgEmbBaseUrl" placeholder="OpenAI 兼容 API 地址">
+                            </div>
+                            <div class="setting-group">
+                                <label for="cfgEmbApiKey">API Key</label>
+                                <div class="input-with-toggle">
+                                    <input type="password" class="setting-input" id="cfgEmbApiKey" placeholder="留空则不修改">
+                                    <button class="btn-icon toggle-key-btn" type="button" title="显示/隐藏">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Reranker -->
+                    <div class="settings-section-title">
+                        Reranker
+                        <div class="mini-toggle" data-target="reranker">
+                            <button class="mini-toggle-btn active" data-value="siliconflow">硅基流动</button>
+                            <button class="mini-toggle-btn" data-value="custom">自定义</button>
+                        </div>
+                    </div>
+                    <div class="model-section" id="sectionReranker">
+                        <div class="model-sf" data-provider="siliconflow">
+                            <div class="setting-group">
+                                <div class="custom-select" id="sfRerankerModelSelect" data-value="">
+                                    <button class="custom-select-trigger" type="button">
+                                        <span class="custom-select-label">加载中...</span>
+                                        <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                                    </button>
+                                    <div class="custom-select-menu"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="model-custom" data-provider="custom" style="display:none">
+                            <div class="setting-group">
+                                <label for="cfgRerankerModel">模型名称</label>
+                                <input type="text" class="setting-input" id="cfgRerankerModel" placeholder="例如 BAAI/bge-reranker-v2-m3">
+                            </div>
+                            <div class="setting-group">
+                                <label for="cfgRerankerBaseUrl">Base URL</label>
+                                <input type="text" class="setting-input" id="cfgRerankerBaseUrl" placeholder="OpenAI 兼容 API 地址">
+                            </div>
+                            <div class="setting-group">
+                                <label for="cfgRerankerApiKey">API Key</label>
+                                <div class="input-with-toggle">
+                                    <input type="password" class="setting-input" id="cfgRerankerApiKey" placeholder="留空则不修改">
+                                    <button class="btn-icon toggle-key-btn" type="button" title="显示/隐藏">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="save-config-btn" id="saveConfigBtn" type="button">保存配置</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 检索策略面板 -->
+        <div class="settings-overlay" id="settingsOverlay">
+            <div class="settings-panel" id="settingsPanel">
+                <div class="settings-header">
+                    <h3>检索策略</h3>
+                    <button class="btn-icon" id="settingsClose">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="settings-body">
+                    <div class="setting-group">
+                        <label>检索方式</label>
+                        <div class="custom-select" id="retrievalStrategySelect" data-value="default">
+                            <button class="custom-select-trigger" type="button">
+                                <span class="custom-select-label">默认（向量检索）</span>
+                                <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                            </button>
+                            <div class="custom-select-menu">
+                                <div class="custom-select-option selected" data-value="default">
+                                    <span class="option-label">默认（向量检索）</span>
+                                    <span class="option-info" data-tip="使用 FAISS 向量相似度搜索，将问题与文档片段进行语义匹配，适合大多数场景">?</span>
+                                </div>
+                                <div class="custom-select-option" data-value="hybrid">
+                                    <span class="option-label">混合检索（向量 + BM25）</span>
+                                    <span class="option-info" data-tip="结合向量语义检索与 BM25 关键词检索，通过 RRF 融合排序，对专有名词和精确匹配更有效">?</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <label>预检索优化</label>
+                        <div class="custom-select" id="preRetrievalSelect" data-value="none">
+                            <button class="custom-select-trigger" type="button">
+                                <span class="custom-select-label">无</span>
+                                <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                            </button>
+                            <div class="custom-select-menu">
+                                <div class="custom-select-option selected" data-value="none">
+                                    <span class="option-label">无</span>
+                                    <span class="option-info" data-tip="直接使用原始问题进行检索，不做任何预处理">?</span>
+                                </div>
+                                <div class="custom-select-option" data-value="rewrite">
+                                    <span class="option-label">查询改写</span>
+                                    <span class="option-info" data-tip="由 LLM 将口语化问题改写为规范检索词，消除指代歧义、补全省略上下文，适合多轮追问">?</span>
+                                </div>
+                                <div class="custom-select-option" data-value="hyde">
+                                    <span class="option-label">HyDE</span>
+                                    <span class="option-info" data-tip="LLM 先生成一段假设性回答，再用该回答的向量去检索，提升语义匹配精度。注意：与混合检索互斥">?</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <label>后检索优化</label>
+                        <div class="custom-select" id="postRetrievalSelect" data-value="none">
+                            <button class="custom-select-trigger" type="button">
+                                <span class="custom-select-label">无</span>
+                                <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                            </button>
+                            <div class="custom-select-menu">
+                                <div class="custom-select-option selected" data-value="none">
+                                    <span class="option-label">无</span>
+                                    <span class="option-info" data-tip="直接使用检索返回的文档片段，不做额外排序">?</span>
+                                </div>
+                                <div class="custom-select-option" data-value="rerank">
+                                    <span class="option-label">重排序</span>
+                                    <span class="option-info" data-tip="使用 BGE-Reranker 交叉编码器对候选文档精排，保留最相关的 Top3，显著提升答案准确率">?</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="strategy-conflict" id="strategyConflict">
+                        <div class="conflict-icon">!</div>
+                        <div class="conflict-text">
+                            <strong>策略冲突</strong>
+                            <span id="strategyConflictMsg">HyDE 与混合检索互斥：HyDE 会将问题替换为假设答案的向量，此时混合检索的 BM25 关键词匹配将失效，因此两者不能同时启用。</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 知识库管理面板 -->
+        <div class="kb-overlay" id="kbOverlay">
+            <div class="kb-panel" id="kbPanel">
+                <div class="kb-panel-header">
+                    <h3>知识库管理</h3>
+                    <button class="btn-icon" id="kbClose">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="kb-panel-body">
+                    <!-- 知识库列表区域 -->
+                    <div class="kb-list-section">
+                        <div class="kb-file-section-title">知识库列表</div>
+                        <div class="kb-list" id="kbList">
+                            <!-- 动态填充 -->
+                        </div>
+                        <div class="kb-create-form" id="kbCreateForm">
+                            <input type="text" class="setting-input" id="kbNameInput" placeholder="新知识库名称">
+                            <button class="btn-accent" id="kbCreateBtn">创建</button>
+                        </div>
+                    </div>
+                    <!-- 文档管理区域（当前选中的知识库） -->
+                    <div class="kb-files-section">
+                        <div class="kb-file-section-title" id="kbFilesTitle">文档列表 — 默认知识库</div>
+                        <div class="kb-upload-area" id="kbUploadArea">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            <p>拖拽文件到此处，或点击选择文件</p>
+                            <span class="kb-upload-hint">支持 PDF / PPTX / DOCX / MD 格式</span>
+                            <input type="file" id="kbFileInput" accept=".pdf,.pptx,.docx,.md" multiple hidden>
+                        </div>
+                        <div class="kb-file-section">
+                            <div class="kb-file-section-title">文档列表</div>
+                            <div class="kb-file-list" id="kbFileList">
+                                <!-- 动态填充 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 侧边栏遮罩（移动端） -->
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="mock-data.js"></script>
+    <script src="app.js?v=3"></script>
+</body>
+</html>
