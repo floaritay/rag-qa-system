@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, H
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Union
 from datetime import datetime, timedelta
 import uuid
 import time
@@ -11,6 +11,7 @@ import sqlite3
 import pickle
 import json
 import re
+import hashlib
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -56,13 +57,34 @@ DEFAULT_TOP_K = 3          # 最终返回文档数
 # Pydantic 模型
 # ============================================================
 
+def _normalize_pre_retrieval(v):
+    """将 pre_retrieval 统一转为有序列表，保证执行顺序: rewrite -> hyde -> mqe"""
+    ORDER = ["rewrite", "hyde", "mqe"]
+    if v is None or v == "none":
+        return []
+    if isinstance(v, str):
+        return [] if v == "none" else [v]
+    if isinstance(v, list):
+        cleaned = [x for x in v if x and x != "none"]
+        return [s for s in ORDER if s in cleaned]
+    return []
+
+
 class Query(BaseModel):
     question: str
     session_id: Optional[str] = None
     kb_id: Optional[str] = None
     retrieval_strategy: Optional[str] = "default"   # "default" | "hybrid"
-    pre_retrieval: Optional[str] = "none"            # "none" | "rewrite" | "hyde"
+    pre_retrieval: Optional[Union[str, List[str]]] = "none"
     post_retrieval: Optional[str] = "none"           # "none" | "rerank"
+    top_k: Optional[int] = None
+
+    def __init__(self, **data):
+        if "pre_retrieval" in data:
+            data["pre_retrieval"] = _normalize_pre_retrieval(data["pre_retrieval"])
+        if "top_k" in data and data["top_k"] is not None:
+            data["top_k"] = max(1, min(data["top_k"], 20))
+        super().__init__(**data)
 
 class Response(BaseModel):
     answer: str
@@ -92,8 +114,16 @@ class OpenAIChatRequest(BaseModel):
     session_id: Optional[str] = None
     kb_id: Optional[str] = None
     retrieval_strategy: Optional[str] = "default"
-    pre_retrieval: Optional[str] = "none"
+    pre_retrieval: Optional[Union[str, List[str]]] = "none"
     post_retrieval: Optional[str] = "none"
+    top_k: Optional[int] = None
+
+    def __init__(self, **data):
+        if "pre_retrieval" in data:
+            data["pre_retrieval"] = _normalize_pre_retrieval(data["pre_retrieval"])
+        if "top_k" in data and data["top_k"] is not None:
+            data["top_k"] = max(1, min(data["top_k"], 20))
+        super().__init__(**data)
 
 class OpenAIChatChoice(BaseModel):
     index: int = 0
@@ -238,6 +268,17 @@ HYDE_PROMPT = """请根据以下问题，写一段简短的假设性答案（约
 问题：{question}
 
 假设性答案："""
+
+MQE_PROMPT = """你是一个检索优化助手。请根据以下用户问题，生成 {n} 个不同的检索查询变体。
+每个变体应从不同角度或使用不同表述来覆盖原始问题的语义。
+要求：
+1. 每个查询变体单独一行
+2. 只输出查询词，不要编号、不要解释
+3. 变体之间应有差异（同义替换、角度切换、简化/详细化等）
+
+用户问题：{question}
+
+查询变体："""
 
 # ============================================================
 # 全局变量
@@ -398,8 +439,27 @@ class KBManager:
         self._access_order = []    # LRU 追踪
         self._lock = threading.Lock()
 
+    @staticmethod
+    def _to_slug(kb_id: str) -> str:
+        """将 kb_id 转为纯 ASCII 目录名，避免 FAISS C++ 后端不支持 Unicode 路径"""
+        ascii_part = re.sub(r'[^a-zA-Z0-9]', '', kb_id)
+        if ascii_part:
+            return ascii_part.lower()
+        return f"kb{hashlib.md5(kb_id.encode('utf-8')).hexdigest()[:8]}"
+
     def get_kb_path(self, kb_id: str) -> str:
-        return os.path.join(base_dir, "knowledge_bases", kb_id)
+        slug = self._to_slug(kb_id)
+        slug_path = os.path.join(base_dir, "knowledge_bases", slug)
+        raw_path = os.path.join(base_dir, "knowledge_bases", kb_id)
+        # 非 ASCII 路径 → 优先迁移（保证后续所有操作用同一路径）
+        if kb_id != slug and os.path.isdir(raw_path):
+            try:
+                os.rename(raw_path, slug_path)
+                print(f"知识库目录已迁移: '{kb_id}' -> '{slug}'")
+            except Exception as e:
+                print(f"目录迁移失败: {e}，使用原路径")
+                return raw_path
+        return slug_path
 
     def get_materials_path(self, kb_id: str) -> str:
         return os.path.join(self.get_kb_path(kb_id), "materials")
@@ -434,12 +494,10 @@ class KBManager:
         return result
 
     def create_kb(self, name: str, description: str = "") -> dict:
-        slug = re.sub(r'[^a-zA-Z0-9一-鿿]+', '-', name).strip('-').lower()
-        if not slug:
-            slug = f"kb-{int(time.time())}"
+        slug = self._to_slug(name)
         registry = self.load_registry()
         if slug in registry:
-            slug = f"{slug}-{int(time.time())}"
+            slug = f"{slug}{int(time.time()) % 10000}"
         now = datetime.now().isoformat()
         info = {"id": slug, "name": name, "created_at": now, "updated_at": now, "description": description}
         registry[slug] = info
@@ -518,6 +576,19 @@ class KBManager:
                 del self._loaded[kb_id]
                 if kb_id in self._access_order:
                     self._access_order.remove(kb_id)
+
+    def put(self, kb_id: str, data: dict):
+        """将数据写入缓存，超出上限时自动淘汰最久未用的条目"""
+        with self._lock:
+            if kb_id in self._loaded:
+                self._loaded[kb_id] = data
+                self._touch(kb_id)
+                return
+            while len(self._loaded) >= self._max_loaded:
+                evict_id = self._access_order.pop(0)
+                del self._loaded[evict_id]
+            self._loaded[kb_id] = data
+            self._access_order.append(kb_id)
 
     def _touch(self, kb_id: str):
         if kb_id in self._access_order:
@@ -1164,7 +1235,7 @@ def init_vectorstore(kb_id="default", force_rebuild=False):
                 docs = load_documents(materials_path)
                 if docs:
                     texts = split_documents(docs)
-                    create_vectorstore(texts, kb_id)
+                    vs = create_vectorstore(texts, kb_id)
 
                     # 构建 manifest
                     chunk_counts = {}
@@ -1187,7 +1258,17 @@ def init_vectorstore(kb_id="default", force_rebuild=False):
                 print(f"创建向量库失败: {e}")
                 return False
 
-            kb_manager.invalidate(kb_id)
+            # 将新建的索引直接写入缓存，避免从磁盘重新加载
+            if vs:
+                retriever = vs.as_retriever(search_kwargs={"k": HYBRID_CANDIDATE_K})
+                tokenized_corpus = [tokenize(doc.page_content) for doc in texts]
+                bm25_index_obj = BM25Okapi(tokenized_corpus)
+                kb_manager.put(kb_id, {
+                    "vectorstore": vs,
+                    "bm25_index": bm25_index_obj,
+                    "bm25_docs": texts,
+                    "retriever": retriever,
+                })
 
         return True
     except Exception as e:
@@ -1230,6 +1311,29 @@ def hyde_generate(question: str) -> str:
     except Exception as e:
         print(f"HyDE 生成失败: {e}，使用原始问题")
         return question
+
+
+def mqe_generate(question: str, n: int = 3) -> List[str]:
+    """让 LLM 生成 n 个查询变体用于多查询扩展"""
+    prompt = MQE_PROMPT.format(question=question, n=n)
+    try:
+        answer = llm.invoke(prompt)
+        raw = answer.content if hasattr(answer, 'content') else str(answer)
+        queries = [line.strip() for line in raw.strip().split('\n') if line.strip()]
+        seen = set()
+        result = []
+        for q in queries:
+            if q and q not in seen:
+                seen.add(q)
+                result.append(q)
+        if not result:
+            result = [question]
+        print(f"MQE 生成 {len(result)} 个查询变体: {result}")
+        return result
+    except Exception as e:
+        print(f"MQE 生成失败: {e}，使用原始问题")
+        return [question]
+
 
 # ============================================================
 # 混合检索策略（向量 + BM25 + RRF 融合）
@@ -1319,56 +1423,12 @@ def extract_sources(docs, top_k=DEFAULT_TOP_K):
 def rag_query(question: str, session_id: Optional[str] = None,
               kb_id: str = "default",
               retrieval_strategy: str = "default",
-              pre_retrieval: str = "none",
-              post_retrieval: str = "none") -> tuple:
-    kb_data = kb_manager.get(kb_id)
-    vs = kb_data["vectorstore"]
-
-    # 1. 预检索优化
-    search_query = question
-    if pre_retrieval == "rewrite":
-        search_query = rewrite_query(question, session_id)
-    elif pre_retrieval == "hyde":
-        search_query = hyde_generate(question)
-
-    # 2. 检索
-    if pre_retrieval == "hyde":
-        hyde_embedding = embeddings.embed_query(search_query)
-        scored = vs.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
-        docs = []
-        for doc, score in scored:
-            if hasattr(doc, 'metadata'):
-                doc.metadata['vector_score'] = round(float(score), 4)
-            docs.append(doc)
-    elif retrieval_strategy == "hybrid":
-        docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K, kb_id=kb_id)
-    else:
-        scored = vs.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
-        docs = []
-        for doc, score in scored:
-            if hasattr(doc, 'metadata'):
-                doc.metadata['vector_score'] = round(float(score), 4)
-            docs.append(doc)
-
-    # 3. 后检索优化：重排序
-    if post_retrieval == "rerank" and reranker:
-        docs = reranker.rerank(question, docs, top_n=DEFAULT_TOP_K)
-
-    # 4. 取 top-k 组装 context
-    top_docs = docs[:DEFAULT_TOP_K]
-    context = "\n\n".join([doc.page_content for doc in top_docs])
-
-    # 5. 提取来源
-    sources = extract_sources(docs)
-
-    # 6. 加载历史
-    history_text = format_history(session_id)
-
-    # 7. Prompt + LLM
-    prompt_text = PROMPT_WITH_HISTORY.format(
-        context=context,
-        history=history_text,
-        question=question
+              pre_retrieval=None,
+              post_retrieval: str = "none",
+              top_k: Optional[int] = None) -> tuple:
+    prompt_text, sources = _retrieve_and_build_prompt(
+        question, session_id, kb_id, retrieval_strategy,
+        pre_retrieval, post_retrieval, use_history=True, top_k=top_k
     )
     answer = llm.invoke(prompt_text)
     answer_text = answer.content if hasattr(answer, 'content') else str(answer)
@@ -1377,86 +1437,112 @@ def rag_query(question: str, session_id: Optional[str] = None,
 def rag_query_stateless(question: str,
                         kb_id: str = "default",
                         retrieval_strategy: str = "default",
-                        pre_retrieval: str = "none",
-                        post_retrieval: str = "none") -> tuple:
-    """无状态 RAG 查询"""
-    kb_data = kb_manager.get(kb_id)
-    vs = kb_data["vectorstore"]
-
-    search_query = question
-    if pre_retrieval == "rewrite":
-        search_query = rewrite_query(question)
-    elif pre_retrieval == "hyde":
-        search_query = hyde_generate(question)
-
-    if pre_retrieval == "hyde":
-        hyde_embedding = embeddings.embed_query(search_query)
-        scored = vs.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
-        docs = []
-        for doc, score in scored:
-            if hasattr(doc, 'metadata'):
-                doc.metadata['vector_score'] = round(float(score), 4)
-            docs.append(doc)
-    elif retrieval_strategy == "hybrid":
-        docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K, kb_id=kb_id)
-    else:
-        scored = vs.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
-        docs = []
-        for doc, score in scored:
-            if hasattr(doc, 'metadata'):
-                doc.metadata['vector_score'] = round(float(score), 4)
-            docs.append(doc)
-
-    if post_retrieval == "rerank" and reranker:
-        docs = reranker.rerank(question, docs, top_n=DEFAULT_TOP_K)
-
-    top_docs = docs[:DEFAULT_TOP_K]
-    context = "\n\n".join([doc.page_content for doc in top_docs])
-    sources = extract_sources(docs)
-    prompt_text = PROMPT.format(context=context, question=question)
+                        pre_retrieval=None,
+                        post_retrieval: str = "none",
+                        top_k: Optional[int] = None) -> tuple:
+    prompt_text, sources = _retrieve_and_build_prompt(
+        question, None, kb_id, retrieval_strategy,
+        pre_retrieval, post_retrieval, use_history=False, top_k=top_k
+    )
     answer = llm.invoke(prompt_text)
     answer_text = answer.content if hasattr(answer, 'content') else str(answer)
     return answer_text, sources
 
 def _retrieve_and_build_prompt(question, session_id=None, kb_id="default",
                                retrieval_strategy="default",
-                               pre_retrieval="none", post_retrieval="none", use_history=True):
+                               pre_retrieval=None, post_retrieval="none",
+                               use_history=True, top_k=None, history_text=None):
     """公共检索逻辑，返回 (prompt_text, sources)"""
+    if pre_retrieval is None:
+        pre_retrieval = []
+    effective_top_k = max(1, min(top_k, 20)) if top_k is not None else DEFAULT_TOP_K
+
     kb_data = kb_manager.get(kb_id)
     vs = kb_data["vectorstore"]
 
-    search_query = question
-    if pre_retrieval == "rewrite":
-        search_query = rewrite_query(question, session_id) if session_id else rewrite_query(question)
-    elif pre_retrieval == "hyde":
-        search_query = hyde_generate(question)
+    # --- Phase 1: 顺序执行预检索查询变换 (rewrite -> hyde -> mqe) ---
+    current_query = question
 
-    if pre_retrieval == "hyde":
-        hyde_embedding = embeddings.embed_query(search_query)
+    if "rewrite" in pre_retrieval:
+        current_query = rewrite_query(current_query, session_id) if session_id else rewrite_query(current_query)
+
+    if "hyde" in pre_retrieval:
+        current_query = hyde_generate(current_query)
+
+    mqe_queries = None
+    if "mqe" in pre_retrieval:
+        mqe_queries = mqe_generate(current_query)
+        if current_query not in mqe_queries:
+            mqe_queries.insert(0, current_query)
+
+    # --- Phase 2: 检索 ---
+    if mqe_queries is not None:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _retrieve_one(q):
+            if "hyde" in pre_retrieval:
+                q_emb = embeddings.embed_query(q)
+                scored = vs.similarity_search_with_score_by_vector(q_emb, k=HYBRID_CANDIDATE_K)
+                return [doc for doc, _ in scored]
+            elif retrieval_strategy == "hybrid":
+                return hybrid_retrieve(q, k=HYBRID_CANDIDATE_K, kb_id=kb_id)
+            else:
+                scored = vs.similarity_search_with_score(q, k=HYBRID_CANDIDATE_K)
+                return [doc for doc, _ in scored]
+
+        all_docs = {}
+        rrf_k = 60
+        with ThreadPoolExecutor(max_workers=min(len(mqe_queries), 4)) as executor:
+            futures = {executor.submit(_retrieve_one, q): i for i, q in enumerate(mqe_queries)}
+            for future in as_completed(futures):
+                q_idx = futures[future]
+                q_docs = future.result()
+                for rank, doc in enumerate(q_docs):
+                    key = doc.page_content[:100]
+                    if key not in all_docs:
+                        all_docs[key] = {"doc": doc, "score": 0}
+                    all_docs[key]["score"] += 1.0 / (rank + rrf_k)
+
+        sorted_items = sorted(all_docs.values(), key=lambda x: x["score"], reverse=True)
+        docs = []
+        for item in sorted_items[:HYBRID_CANDIDATE_K]:
+            doc = item["doc"]
+            if hasattr(doc, 'metadata'):
+                doc.metadata['rrf_score'] = round(item["score"], 6)
+            docs.append(doc)
+
+    elif "hyde" in pre_retrieval:
+        hyde_embedding = embeddings.embed_query(current_query)
         scored = vs.similarity_search_with_score_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
         docs = []
         for doc, score in scored:
             if hasattr(doc, 'metadata'):
                 doc.metadata['vector_score'] = round(float(score), 4)
             docs.append(doc)
+
     elif retrieval_strategy == "hybrid":
-        docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K, kb_id=kb_id)
+        docs = hybrid_retrieve(current_query, k=HYBRID_CANDIDATE_K, kb_id=kb_id)
+
     else:
-        scored = vs.similarity_search_with_score(search_query, k=HYBRID_CANDIDATE_K)
+        scored = vs.similarity_search_with_score(current_query, k=HYBRID_CANDIDATE_K)
         docs = []
         for doc, score in scored:
             if hasattr(doc, 'metadata'):
                 doc.metadata['vector_score'] = round(float(score), 4)
             docs.append(doc)
 
+    # --- Phase 3: 后检索 ---
     if post_retrieval == "rerank" and reranker:
-        docs = reranker.rerank(question, docs, top_n=DEFAULT_TOP_K)
+        docs = reranker.rerank(question, docs, top_n=effective_top_k)
 
-    top_docs = docs[:DEFAULT_TOP_K]
+    # --- Phase 4: 截断并构建 prompt ---
+    top_docs = docs[:effective_top_k]
     context = "\n\n".join([doc.page_content for doc in top_docs])
-    sources = extract_sources(docs)
+    sources = extract_sources(docs, top_k=effective_top_k)
 
-    if use_history and session_id:
+    if history_text:
+        prompt_text = PROMPT_WITH_HISTORY.format(context=context, history=history_text, question=question)
+    elif use_history and session_id:
         history_text = format_history(session_id)
         prompt_text = PROMPT_WITH_HISTORY.format(context=context, history=history_text, question=question)
     else:
@@ -1466,10 +1552,11 @@ def _retrieve_and_build_prompt(question, session_id=None, kb_id="default",
 
 def rag_query_stream(question, session_id=None, kb_id="default",
                      retrieval_strategy="default",
-                     pre_retrieval="none", post_retrieval="none"):
+                     pre_retrieval=None, post_retrieval="none", top_k=None):
     """流式 RAG 查询（同步生成器）：先 yield sources JSON，再逐 token yield"""
     prompt_text, sources = _retrieve_and_build_prompt(
-        question, session_id, kb_id, retrieval_strategy, pre_retrieval, post_retrieval, use_history=True
+        question, session_id, kb_id, retrieval_strategy,
+        pre_retrieval, post_retrieval, use_history=True, top_k=top_k
     )
     yield json.dumps({"type": "sources", "data": sources}, ensure_ascii=False)
     for chunk in llm.stream(prompt_text):
@@ -1479,10 +1566,11 @@ def rag_query_stream(question, session_id=None, kb_id="default",
 
 def rag_query_stateless_stream(question, kb_id="default",
                                retrieval_strategy="default",
-                               pre_retrieval="none", post_retrieval="none"):
+                               pre_retrieval=None, post_retrieval="none", top_k=None):
     """无状态流式 RAG 查询（同步生成器）"""
     prompt_text, sources = _retrieve_and_build_prompt(
-        question, None, kb_id, retrieval_strategy, pre_retrieval, post_retrieval, use_history=False
+        question, None, kb_id, retrieval_strategy,
+        pre_retrieval, post_retrieval, use_history=False, top_k=top_k
     )
     yield json.dumps({"type": "sources", "data": sources}, ensure_ascii=False)
     for chunk in llm.stream(prompt_text):
@@ -1901,6 +1989,7 @@ async def ask_stream(query: Query, background_tasks: BackgroundTasks):
                 "retrieval_strategy": query.retrieval_strategy,
                 "pre_retrieval": query.pre_retrieval,
                 "post_retrieval": query.post_retrieval,
+                "top_k": query.top_k,
             }
             if session_id:
                 kwargs["session_id"] = session_id
@@ -1964,7 +2053,8 @@ async def ask_question(query: Query, background_tasks: BackgroundTasks):
                 answer, sources = await asyncio.wait_for(
                     asyncio.to_thread(
                         rag_query, query.question, session_id, kb_id,
-                        query.retrieval_strategy, query.pre_retrieval, query.post_retrieval
+                        query.retrieval_strategy, query.pre_retrieval, query.post_retrieval,
+                        query.top_k
                     ),
                     timeout=180
                 )
@@ -1972,7 +2062,8 @@ async def ask_question(query: Query, background_tasks: BackgroundTasks):
                 answer, sources = await asyncio.wait_for(
                     asyncio.to_thread(
                         rag_query_stateless, query.question, kb_id,
-                        query.retrieval_strategy, query.pre_retrieval, query.post_retrieval
+                        query.retrieval_strategy, query.pre_retrieval, query.post_retrieval,
+                        query.top_k
                     ),
                     timeout=180
                 )
@@ -2055,6 +2146,7 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
                     "retrieval_strategy": request.retrieval_strategy,
                     "pre_retrieval": request.pre_retrieval,
                     "post_retrieval": request.post_retrieval,
+                    "top_k": request.top_k,
                 }
                 if session_id:
                     kwargs["session_id"] = session_id
@@ -2110,7 +2202,8 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
             answer, _sources = await asyncio.wait_for(
                 asyncio.to_thread(
                     rag_query, user_message, session_id, kb_id,
-                    request.retrieval_strategy, request.pre_retrieval, request.post_retrieval
+                    request.retrieval_strategy, request.pre_retrieval, request.post_retrieval,
+                    request.top_k
                 ),
                 timeout=180
             )
@@ -2122,29 +2215,10 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
                     history_lines.append(f"{role_label}：{msg.content}")
                 history_text = "### 对话历史：\n" + "\n\n".join(history_lines) + "\n\n"
 
-                kb_data = kb_manager.get(kb_id)
-                vs = kb_data["vectorstore"]
-
-                search_query = user_message
-                if request.pre_retrieval == "rewrite":
-                    search_query = rewrite_query(user_message)
-                elif request.pre_retrieval == "hyde":
-                    search_query = hyde_generate(user_message)
-
-                if request.pre_retrieval == "hyde":
-                    hyde_embedding = embeddings.embed_query(search_query)
-                    docs = vs.similarity_search_by_vector(hyde_embedding, k=HYBRID_CANDIDATE_K)
-                elif request.retrieval_strategy == "hybrid":
-                    docs = hybrid_retrieve(search_query, k=HYBRID_CANDIDATE_K, kb_id=kb_id)
-                else:
-                    docs = vs.as_retriever(search_kwargs={"k": HYBRID_CANDIDATE_K}).invoke(search_query)
-
-                if request.post_retrieval == "rerank" and reranker:
-                    docs = reranker.rerank(user_message, docs, top_n=DEFAULT_TOP_K)
-
-                context = "\n\n".join([doc.page_content for doc in docs[:DEFAULT_TOP_K]])
-                prompt_text = PROMPT_WITH_HISTORY.format(
-                    context=context, history=history_text, question=user_message
+                prompt_text, _sources = _retrieve_and_build_prompt(
+                    user_message, None, kb_id,
+                    request.retrieval_strategy, request.pre_retrieval, request.post_retrieval,
+                    use_history=False, top_k=request.top_k, history_text=history_text
                 )
                 answer_obj = await asyncio.wait_for(
                     asyncio.to_thread(llm.invoke, prompt_text),
@@ -2155,7 +2229,8 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
                 answer, _sources = await asyncio.wait_for(
                     asyncio.to_thread(
                         rag_query_stateless, user_message, kb_id,
-                        request.retrieval_strategy, request.pre_retrieval, request.post_retrieval
+                        request.retrieval_strategy, request.pre_retrieval, request.post_retrieval,
+                        request.top_k
                     ),
                     timeout=180
                 )
@@ -2314,6 +2389,17 @@ init_default_kb()
 kb_manager = KBManager(max_loaded=2)
 init_db()
 init_shared_models()
+
+# 清理 knowledge_bases/ 根目录下的孤立 index 文件（FAISS 旧 bug 产生的乱码文件）
+_kb_root = os.path.join(base_dir, "knowledge_bases")
+if os.path.isdir(_kb_root):
+    for _f in os.listdir(_kb_root):
+        if _f.endswith('.faiss') or _f.endswith('.faiss.pkl'):
+            try:
+                os.remove(os.path.join(_kb_root, _f))
+                print(f"已清理孤立索引文件: {_f}")
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     print("=" * 50)

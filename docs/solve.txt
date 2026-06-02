@@ -476,3 +476,49 @@
 ### 主要改动
 - `backend/main_siliconflow_rag.py` L2313-2314：交换 `init_default_kb()` 和 `kb_manager = KBManager(max_loaded=2)` 的顺序
 - `backend/requirements.txt`：新增 `chardet>=5.0.0,<6.0.0`
+
+### 问题：重建索引后查询仍报"尚未构建索引"
+**日期**：2026-06-02
+
+**现象**：
+- 知识库重建索引成功（日志显示向量库和 BM25 索引已保存）
+- 但重建后立即查询仍报错：`知识库 '机器人控制技术' 尚未构建索引，请先上传文档并构建`
+
+**分析**：
+1. `init_vectorstore(force_rebuild=True)` 完成后，调用 `kb_manager.invalidate(kb_id)`（原 L1190）
+2. `invalidate()` 将 kb_id 从 `_loaded` 缓存中移除
+3. 下次查询时 `kb_manager.get(kb_id)` 尝试 `_load_from_disk()`
+4. `_load_from_disk()` 检查 `index.faiss` 是否存在（L496-497），若不存在则抛出 `FileNotFoundError`
+5. 根本原因：`invalidate` 后缓存为空，而 `_load_from_disk` 可能因文件系统延迟或路径编码问题找不到刚写入的文件
+
+**解决方案**：
+- 捕获 `create_vectorstore()` 返回的 FAISS 向量库对象 `vs`
+- 利用已有的 `texts` 列表直接构建 BM25 索引，无需重新从磁盘加载
+- 将 `vs`、retriever、BM25 索引直接写入 `kb_manager._loaded` 缓存
+- 完全避免从磁盘重新加载，消除文件系统时序问题
+
+### 主要改动
+- `backend/main_siliconflow_rag.py` L1167：捕获 `create_vectorstore()` 返回值
+- `backend/main_siliconflow_rag.py` L1190-1201：将 `invalidate()` 替换为从内存直接构建缓存
+
+### 功能：添加 MQE 多查询扩展、多预检索组合、可配置 Top-K
+**日期**：2026-06-02
+
+**需求**：
+1. 添加 MQE（Multi-Query Expansion）预检索优化：LLM 生成多个查询变体，分别检索后合并去重
+2. 预检索方法支持多选组合（如 查询改写 + MQE）
+3. 用户可选择返回文档数（Top 3/5/7/10）
+
+**实现**：
+1. **Pydantic 模型**：`pre_retrieval` 类型从 `str` 改为 `Union[str, List[str]]`，添加 `_normalize_pre_retrieval()` 保证执行顺序 (rewrite → hyde → mqe)；新增 `top_k` 字段
+2. **MQE 函数**：`MQE_PROMPT` 模板 + `mqe_generate(question, n=3)` 生成 N 个查询变体
+3. **核心重构**：`_retrieve_and_build_prompt()` 支持多预检索顺序执行、MQE 多查询 RRF 合并、可配置 top_k、可注入 history_text
+4. **消除重复**：`rag_query()` 和 `rag_query_stateless()` 改为委托 `_retrieve_and_build_prompt()`，消除 ~100 行重复代码
+5. **前端多选组件**：新增 `.multi-select` checkbox 下拉组件替换原单选下拉
+6. **Top-K 下拉**：新增 `topKSelect` 组件（Top 3/5/7/10）
+
+### 主要改动
+- `backend/main_siliconflow_rag.py`：Pydantic 模型、MQE 函数、`_retrieve_and_build_prompt` 重构、所有调用点更新
+- `web/index.html`：preRetrievalSelect 改为多选组件，新增 topKSelect
+- `web/styles.css`：新增 `.multi-select-*` CSS
+- `web/app.js`：新增 `initMultiSelects()`、`getPreRetrievalValues()`、更新冲突检查和请求体构建

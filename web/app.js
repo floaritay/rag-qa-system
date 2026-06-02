@@ -33,6 +33,7 @@ const dom = {
     retrievalStrategySelect: $('retrievalStrategySelect'),
     preRetrievalSelect: $('preRetrievalSelect'),
     postRetrievalSelect: $('postRetrievalSelect'),
+    topKSelect: $('topKSelect'),
     strategyConflict: $('strategyConflict'),
     strategyConflictMsg: $('strategyConflictMsg'),
     toastContainer: $('toastContainer'),
@@ -605,8 +606,9 @@ async function askQuestion(question) {
         const body = { question, kb_id: currentKbId };
         if (currentSessionId) body.session_id = currentSessionId;
         body.retrieval_strategy = getSelectValue('retrievalStrategySelect');
-        body.pre_retrieval = getSelectValue('preRetrievalSelect');
+        body.pre_retrieval = getPreRetrievalValues();
         body.post_retrieval = getSelectValue('postRetrievalSelect');
+        body.top_k = parseInt(getSelectValue('topKSelect')) || 3;
 
         const res = await fetch(`${API_URL}/ask/stream`, {
             method: 'POST',
@@ -1088,6 +1090,7 @@ function getSelectValue(id) {
 
 function initCustomSelects() {
     document.querySelectorAll('.custom-select').forEach(select => {
+        if (select.classList.contains('multi-select')) return; // handled by initMultiSelects
         const trigger = select.querySelector('.custom-select-trigger');
         const menu = select.querySelector('.custom-select-menu');
 
@@ -1128,6 +1131,51 @@ function initCustomSelects() {
     document.addEventListener('click', () => {
         document.querySelectorAll('.custom-select.open').forEach(s => s.classList.remove('open'));
     });
+}
+
+function initMultiSelects() {
+    document.querySelectorAll('.multi-select').forEach(select => {
+        const trigger = select.querySelector('.custom-select-trigger');
+        const menu = select.querySelector('.custom-select-menu');
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const wasOpen = select.classList.contains('open');
+            document.querySelectorAll('.custom-select.open').forEach(s => s.classList.remove('open'));
+            if (!wasOpen) select.classList.add('open');
+        });
+
+        // Click on option row toggles its checkbox
+        menu.querySelectorAll('.custom-select-option').forEach(option => {
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const cb = option.querySelector('input[type="checkbox"]');
+                if (e.target !== cb) {
+                    cb.checked = !cb.checked;
+                }
+                option.classList.toggle('checked', cb.checked);
+                updateMultiSelectLabel(select);
+                updateStrategyConstraints();
+            });
+        });
+    });
+}
+
+function updateMultiSelectLabel(select) {
+    const label = select.querySelector('.custom-select-label');
+    const checked = select.querySelectorAll('input[type="checkbox"]:checked');
+    const names = [];
+    checked.forEach(cb => {
+        const opt = cb.closest('.custom-select-option');
+        names.push(opt.querySelector('.option-label').textContent);
+    });
+    label.textContent = names.length ? names.join(' + ') : '无';
+}
+
+function getPreRetrievalValues() {
+    const select = document.getElementById('preRetrievalSelect');
+    const checked = select.querySelectorAll('input[type="checkbox"]:checked');
+    return Array.from(checked).map(cb => cb.value);
 }
 
 // ============================================================
@@ -1225,12 +1273,11 @@ function populateModelSelect(selectEl, models) {
 }
 
 function updateStrategyConstraints() {
-    const pre = getSelectValue('preRetrievalSelect');
+    const pre = getPreRetrievalValues();
     const retrieval = getSelectValue('retrievalStrategySelect');
     const conflict = dom.strategyConflict;
 
-    // Check HyDE + hybrid conflict
-    if (pre === 'hyde' && retrieval === 'hybrid') {
+    if (pre.includes('hyde') && retrieval === 'hybrid') {
         conflict.classList.add('visible');
     } else {
         conflict.classList.remove('visible');
@@ -1482,6 +1529,7 @@ document.addEventListener('DOMContentLoaded', () => {
     bindChipClicks();
     updateMenuArrow();
     initCustomSelects();
+    initMultiSelects();
     initMiniToggles();
     setInterval(checkHealth, 30000);
 });

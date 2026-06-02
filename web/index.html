@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=3">
+    <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
     <div class="app">
@@ -328,23 +328,26 @@
                     </div>
                     <div class="setting-group">
                         <label>预检索优化</label>
-                        <div class="custom-select" id="preRetrievalSelect" data-value="none">
+                        <div class="custom-select multi-select" id="preRetrievalSelect" data-value="">
                             <button class="custom-select-trigger" type="button">
                                 <span class="custom-select-label">无</span>
                                 <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
                             </button>
                             <div class="custom-select-menu">
-                                <div class="custom-select-option selected" data-value="none">
-                                    <span class="option-label">无</span>
-                                    <span class="option-info" data-tip="直接使用原始问题进行检索，不做任何预处理">?</span>
-                                </div>
                                 <div class="custom-select-option" data-value="rewrite">
                                     <span class="option-label">查询改写</span>
                                     <span class="option-info" data-tip="由 LLM 将口语化问题改写为规范检索词，消除指代歧义、补全省略上下文，适合多轮追问">?</span>
+                                    <input type="checkbox" value="rewrite">
                                 </div>
                                 <div class="custom-select-option" data-value="hyde">
                                     <span class="option-label">HyDE</span>
-                                    <span class="option-info" data-tip="LLM 先生成一段假设性回答，再用该回答的向量去检索，提升语义匹配精度。注意：与混合检索互斥">?</span>
+                                    <span class="option-info" data-tip="LLM 先生成一段假设性回答，再用该回答的向量去检索。注意：与混合检索互斥">?</span>
+                                    <input type="checkbox" value="hyde">
+                                </div>
+                                <div class="custom-select-option" data-value="mqe">
+                                    <span class="option-label">多查询扩展 (MQE)</span>
+                                    <span class="option-info" data-tip="LLM 生成多个查询变体，分别检索后合并去重，提升召回覆盖率">?</span>
+                                    <input type="checkbox" value="mqe">
                                 </div>
                             </div>
                         </div>
@@ -364,6 +367,29 @@
                                 <div class="custom-select-option" data-value="rerank">
                                     <span class="option-label">重排序</span>
                                     <span class="option-info" data-tip="使用 BGE-Reranker 交叉编码器对候选文档精排，保留最相关的 Top3，显著提升答案准确率">?</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <label>返回文档数 (Top-K)</label>
+                        <div class="custom-select" id="topKSelect" data-value="3">
+                            <button class="custom-select-trigger" type="button">
+                                <span class="custom-select-label">Top 3</span>
+                                <svg class="custom-select-arrow" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                            </button>
+                            <div class="custom-select-menu">
+                                <div class="custom-select-option selected" data-value="3">
+                                    <span class="option-label">Top 3</span>
+                                </div>
+                                <div class="custom-select-option" data-value="5">
+                                    <span class="option-label">Top 5</span>
+                                </div>
+                                <div class="custom-select-option" data-value="7">
+                                    <span class="option-label">Top 7</span>
+                                </div>
+                                <div class="custom-select-option" data-value="10">
+                                    <span class="option-label">Top 10</span>
                                 </div>
                             </div>
                         </div>
@@ -434,6 +460,6 @@
     <!-- Toast 通知 -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=4"></script>
 </body>
 </html>
