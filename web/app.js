@@ -327,12 +327,12 @@ async function switchSession(sessionId) {
             const data = await msgRes.json();
             const messages = data.messages || [];
             if (messages.length === 0) {
-                showWelcome();
+                showWelcome(false);
             } else {
                 messages.forEach(msg => {
                     addMessage(msg.content, msg.role === 'user' ? 'user' : 'assistant', false);
                 });
-                scrollChatBottom();
+                scrollChatBottom(true);
             }
         }
 
@@ -354,7 +354,7 @@ async function deleteSession(sessionId) {
             currentSessionId = null;
             dom.topbarTitle.textContent = '个人知识库';
             dom.chatMessages.innerHTML = '';
-            showWelcome();
+            showWelcome(false);
         }
         loadSessionList();
     } catch (e) {
@@ -465,7 +465,7 @@ function createStreamingMessage() {
     const msg = document.createElement('div');
     msg.className = 'message assistant';
     msg.innerHTML = `
-        <div class="message-avatar" style="background: linear-gradient(135deg, #c87941 0%, #a85d30 100%); color: #fff; flex-shrink: 0; width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 14px;">AI</div>
+        <div class="message-avatar">AI</div>
         <div class="message-body">
             <div class="message-role">Assistant</div>
             <div class="message-content"><span class="streaming-cursor"></span></div>
@@ -523,7 +523,7 @@ function renderSourcesPanel(container, sources) {
     const list = container.querySelector('.sources-list');
     toggle.addEventListener('click', () => {
         toggle.classList.toggle('open');
-        list.style.display = list.style.display === 'block' ? 'none' : 'block';
+        list.classList.toggle('open');
     });
 }
 
@@ -548,7 +548,7 @@ function addTypingIndicator() {
     indicator.className = 'typing-indicator';
     indicator.id = 'typingIndicator';
     indicator.innerHTML = `
-        <div class="message-avatar" style="background: linear-gradient(135deg, #c87941 0%, #a85d30 100%); color: #fff; flex-shrink: 0; width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 14px;">AI</div>
+        <div class="message-avatar">AI</div>
         <div class="typing-dots">
             <span></span><span></span><span></span>
         </div>
@@ -562,9 +562,13 @@ function removeTypingIndicator() {
     if (el) el.remove();
 }
 
-function scrollChatBottom() {
+function scrollChatBottom(smooth = false) {
     requestAnimationFrame(() => {
-        dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+        if (smooth) {
+            dom.chatMessages.scrollTo({ top: dom.chatMessages.scrollHeight, behavior: 'smooth' });
+        } else {
+            dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+        }
     });
 }
 
@@ -778,14 +782,14 @@ async function switchKnowledgeBase(kbId) {
     await loadSessionList();
     // Reload KB selector to update selected state
     await loadKnowledgeBases();
-    // Show welcome screen
-    showWelcome();
+    // Show welcome screen (no animation on KB switch)
+    showWelcome(false);
 }
 
-function showWelcome() {
+function showWelcome(animate = true) {
     dom.chatMessages.innerHTML = '';
     const welcome = document.createElement('div');
-    welcome.className = 'welcome';
+    welcome.className = 'welcome' + (animate ? '' : ' no-animate');
     welcome.id = 'welcome';
     welcome.innerHTML = `
         <div class="welcome-glow"></div>
@@ -888,7 +892,7 @@ function selectKbInPanel(kbId) {
     // Reload sessions and files
     loadSessionList();
     loadMaterialFiles();
-    showWelcome();
+    showWelcome(false);
 }
 
 async function createKnowledgeBase() {
@@ -929,7 +933,7 @@ async function deleteKnowledgeBase(kbId, kbName) {
             if (currentKbId === kbId) {
                 currentKbId = 'default';
                 currentSessionId = null;
-                showWelcome();
+                showWelcome(false);
             }
             await loadKnowledgeBases();
             await loadKnowledgeBasesForPanel();
@@ -1451,7 +1455,9 @@ dom.sendBtn.addEventListener('click', () => askQuestion(dom.questionInput.value)
 dom.questionInput.addEventListener('keydown', handleKeyDown);
 dom.questionInput.addEventListener('input', () => {
     autoResize();
-    dom.sendBtn.disabled = !dom.questionInput.value.trim();
+    if (!isProcessing) {
+        dom.sendBtn.disabled = !dom.questionInput.value.trim();
+    }
 });
 
 dom.newChatBtn.addEventListener('click', createNewSession);

@@ -346,15 +346,14 @@ class OpenAICompatibleEmbeddings(Embeddings):
         except Exception as e:
             print(f"调用嵌入模型API失败: {e}")
             print(f"响应内容: {response.text if 'response' in locals() else '无响应'}")
-            return None
+            raise RuntimeError(f"嵌入模型API调用失败: {e}") from e
 
     def embed_documents(self, texts):
-        result = self._get_embeddings(texts)
-        return result if result else []
+        return self._get_embeddings(texts)
 
     def embed_query(self, text):
         result = self._get_embeddings([text])
-        return result[0] if result else []
+        return result[0]
 
 # ============================================================
 # OpenAICompatibleReranker 类（后检索优化）
@@ -1216,13 +1215,12 @@ def init_vectorstore(kb_id="default", force_rebuild=False):
                 print("警告：BM25 索引文件不存在，混合检索不可用。请使用 /init?force_rebuild=true 重建知识库")
 
             # 存入缓存
-            kb_manager._loaded[kb_id] = {
+            kb_manager.put(kb_id, {
                 "vectorstore": vectorstore,
                 "bm25_index": bm25_index_obj,
                 "bm25_docs": bm25_docs_list,
                 "retriever": retriever,
-            }
-            kb_manager._touch(kb_id)
+            })
 
             # 加载 manifest
             manifest = load_manifest(kb_id)
@@ -1261,12 +1259,19 @@ def init_vectorstore(kb_id="default", force_rebuild=False):
             # 将新建的索引直接写入缓存，避免从磁盘重新加载
             if vs:
                 retriever = vs.as_retriever(search_kwargs={"k": HYBRID_CANDIDATE_K})
-                tokenized_corpus = [tokenize(doc.page_content) for doc in texts]
-                bm25_index_obj = BM25Okapi(tokenized_corpus)
+                # 从 create_vectorstore 已保存的 pickle 加载 BM25，保证数据一致性
+                bm25_index_obj = None
+                bm25_docs_list = None
+                bm25_path = os.path.join(kb_path, "bm25_index.pkl")
+                if os.path.exists(bm25_path):
+                    with open(bm25_path, "rb") as f:
+                        bm25_data = pickle.load(f)
+                    bm25_index_obj = BM25Okapi(bm25_data["tokenized_corpus"])
+                    bm25_docs_list = bm25_data["documents"]
                 kb_manager.put(kb_id, {
                     "vectorstore": vs,
                     "bm25_index": bm25_index_obj,
-                    "bm25_docs": texts,
+                    "bm25_docs": bm25_docs_list,
                     "retriever": retriever,
                 })
 
@@ -1363,12 +1368,12 @@ def hybrid_retrieve(query: str, k: int = DEFAULT_TOP_K, kb_id: str = "default") 
     rrf_k = 60  # RRF 常数
 
     for rank, doc in enumerate(vector_docs):
-        key = doc.page_content[:100]  # 用前100字符作为去重key
+        key = doc.page_content[:200]  # 用前200字符作为去重key
         doc_scores[key] = doc_scores.get(key, {"doc": doc, "score": 0})
         doc_scores[key]["score"] += VECTOR_WEIGHT / (rank + rrf_k)
 
     for rank, doc in enumerate(bm25_results):
-        key = doc.page_content[:100]
+        key = doc.page_content[:200]
         doc_scores[key] = doc_scores.get(key, {"doc": doc, "score": 0})
         doc_scores[key]["score"] += BM25_WEIGHT / (rank + rrf_k)
 
@@ -1480,7 +1485,34 @@ def _retrieve_and_build_prompt(question, session_id=None, kb_id="default",
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         def _retrieve_one(q):
-            if "hyde" in pre_retrieval:
+            if "hyde" in pre_retrieval and retrieval_strategy == "hybrid":
+                # HyDE + Hybrid: 用 HyDE 向量做向量检索 + BM25 关键词检索融合
+                q_emb = embeddings.embed_query(q)
+                vector_results = vs.similarity_search_with_score_by_vector(q_emb, k=HYBRID_CANDIDATE_K)
+                vector_docs = [doc for doc, _ in vector_results]
+                bm25_results = []
+                kb_data_inner = kb_manager.get(kb_id)
+                bm25_idx_inner = kb_data_inner["bm25_index"]
+                bm25_docs_inner = kb_data_inner["bm25_docs"]
+                if bm25_idx_inner is not None and bm25_docs_inner is not None:
+                    q_tokens = tokenize(q)
+                    scores = bm25_idx_inner.get_scores(q_tokens)
+                    top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:HYBRID_CANDIDATE_K]
+                    bm25_results = [bm25_docs_inner[i] for i in top_indices if scores[i] > 0]
+                # RRF 融合
+                doc_scores = {}
+                rrf_k_local = 60
+                for r, doc in enumerate(vector_docs):
+                    key = doc.page_content[:200]
+                    doc_scores[key] = doc_scores.get(key, {"doc": doc, "score": 0})
+                    doc_scores[key]["score"] += VECTOR_WEIGHT / (r + rrf_k_local)
+                for r, doc in enumerate(bm25_results):
+                    key = doc.page_content[:200]
+                    doc_scores[key] = doc_scores.get(key, {"doc": doc, "score": 0})
+                    doc_scores[key]["score"] += BM25_WEIGHT / (r + rrf_k_local)
+                sorted_items = sorted(doc_scores.values(), key=lambda x: x["score"], reverse=True)
+                return [item["doc"] for item in sorted_items[:HYBRID_CANDIDATE_K]]
+            elif "hyde" in pre_retrieval:
                 q_emb = embeddings.embed_query(q)
                 scored = vs.similarity_search_with_score_by_vector(q_emb, k=HYBRID_CANDIDATE_K)
                 return [doc for doc, _ in scored]
@@ -1498,7 +1530,7 @@ def _retrieve_and_build_prompt(question, session_id=None, kb_id="default",
                 q_idx = futures[future]
                 q_docs = future.result()
                 for rank, doc in enumerate(q_docs):
-                    key = doc.page_content[:100]
+                    key = doc.page_content[:200]
                     if key not in all_docs:
                         all_docs[key] = {"doc": doc, "score": 0}
                     all_docs[key]["score"] += 1.0 / (rank + rrf_k)
@@ -1533,7 +1565,7 @@ def _retrieve_and_build_prompt(question, session_id=None, kb_id="default",
 
     # --- Phase 3: 后检索 ---
     if post_retrieval == "rerank" and reranker:
-        docs = reranker.rerank(question, docs, top_n=effective_top_k)
+        docs = reranker.rerank(current_query, docs, top_n=effective_top_k)
 
     # --- Phase 4: 截断并构建 prompt ---
     top_docs = docs[:effective_top_k]
@@ -2004,18 +2036,21 @@ async def ask_stream(query: Query, background_tasks: BackgroundTasks):
         except Exception as e:
             print(f"[ask/stream 错误] {e}")
             yield f"data: {json.dumps({'type': 'error', 'data': str(e)}, ensure_ascii=False)}\n\n"
-
-        # 流式完成后保存消息
-        answer_text = "".join(full_answer)
-        if session_id and answer_text:
-            add_message(session_id, "user", query.question)
-            add_message(session_id, "assistant", answer_text)
-            msg_count = get_message_count(session_id)
-            if msg_count == 2:
-                title = query.question[:30] + ("..." if len(query.question) > 30 else "")
-                update_session_title(session_id, title)
-            if msg_count > 0 and msg_count % SUMMARY_TRIGGER_COUNT == 0:
-                background_tasks.add_task(generate_summary_task, session_id)
+        finally:
+            # 流式完成后保存消息（finally 保证客户端断开时也能保存）
+            answer_text = "".join(full_answer)
+            if session_id and answer_text:
+                try:
+                    add_message(session_id, "user", query.question)
+                    add_message(session_id, "assistant", answer_text)
+                    msg_count = get_message_count(session_id)
+                    if msg_count == 2:
+                        title = query.question[:30] + ("..." if len(query.question) > 30 else "")
+                        update_session_title(session_id, title)
+                    if msg_count > 0 and msg_count % SUMMARY_TRIGGER_COUNT == 0:
+                        background_tasks.add_task(generate_summary_task, session_id)
+                except Exception as save_err:
+                    print(f"[ask/stream 保存消息失败] {save_err}")
 
     return StreamingResponse(
         event_generator(),
@@ -2177,18 +2212,21 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
             except Exception as e:
                 error_chunk = {"error": {"message": str(e), "type": "server_error"}}
                 yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
-
-            # 保存消息
-            answer_text = "".join(full_answer)
-            if session_id and answer_text:
-                add_message(session_id, "user", user_message)
-                add_message(session_id, "assistant", answer_text)
-                msg_count = get_message_count(session_id)
-                if msg_count == 2:
-                    title = user_message[:30] + ("..." if len(user_message) > 30 else "")
-                    update_session_title(session_id, title)
-                if msg_count > 0 and msg_count % SUMMARY_TRIGGER_COUNT == 0:
-                    background_tasks.add_task(generate_summary_task, session_id)
+            finally:
+                # 保存消息（finally 保证客户端断开时也能保存）
+                answer_text = "".join(full_answer)
+                if session_id and answer_text:
+                    try:
+                        add_message(session_id, "user", user_message)
+                        add_message(session_id, "assistant", answer_text)
+                        msg_count = get_message_count(session_id)
+                        if msg_count == 2:
+                            title = user_message[:30] + ("..." if len(user_message) > 30 else "")
+                            update_session_title(session_id, title)
+                        if msg_count > 0 and msg_count % SUMMARY_TRIGGER_COUNT == 0:
+                            background_tasks.add_task(generate_summary_task, session_id)
+                    except Exception as save_err:
+                        print(f"[chat/stream 保存消息失败] {save_err}")
 
         return StreamingResponse(
             openai_stream_generator(),

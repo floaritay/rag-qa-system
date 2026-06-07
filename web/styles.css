@@ -302,7 +302,8 @@ body {
     transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
 }
 
-.session-item:hover .session-item-delete {
+.session-item:hover .session-item-delete,
+.session-item-delete:focus-visible {
     opacity: 1;
 }
 
@@ -454,6 +455,7 @@ body {
 .chat-messages {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 0;
     display: flex;
     flex-direction: column;
@@ -470,6 +472,10 @@ body {
     padding: 40px 24px;
     position: relative;
     animation: fadeInUp 0.6s var(--ease);
+}
+
+.welcome.no-animate {
+    animation: none;
 }
 
 @keyframes fadeInUp {
@@ -556,10 +562,16 @@ body {
     transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
 }
 
-.chip:hover {
+.chip:hover,
+.chip:focus-visible {
     background: var(--bg-hover);
     border-color: var(--accent);
     color: var(--text-primary);
+}
+
+.chip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 /* Messages */
@@ -720,67 +732,6 @@ body {
     font-size: 14px;
 }
 
-/* Sources */
-.message-sources {
-    margin-top: 12px;
-    padding-top: 10px;
-    border-top: 1px solid var(--border-subtle);
-}
-
-.sources-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    background: none;
-    border: none;
-    color: var(--text-tertiary);
-    font-family: var(--font-body);
-    font-size: 12px;
-    cursor: pointer;
-    padding: 4px 0;
-    transition: color var(--t-fast);
-}
-
-.sources-toggle:hover {
-    color: var(--accent);
-}
-
-.sources-toggle svg {
-    transition: transform var(--t-fast);
-}
-
-.sources-toggle.open svg {
-    transform: rotate(180deg);
-}
-
-.sources-list {
-    display: none;
-    margin-top: 8px;
-}
-
-.sources-list.open {
-    display: block;
-}
-
-.source-item {
-    font-size: 12px;
-    color: var(--text-tertiary);
-    padding: 4px 0;
-    padding-left: 12px;
-    position: relative;
-}
-
-.source-item::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 10px;
-    width: 4px;
-    height: 4px;
-    background: var(--accent);
-    border-radius: 50%;
-}
-
 /* Typing indicator */
 .typing-indicator {
     display: flex;
@@ -791,6 +742,11 @@ body {
     width: 100%;
     margin: 0 auto;
     animation: msgIn 0.3s var(--ease);
+}
+
+.typing-indicator .message-avatar {
+    background: linear-gradient(135deg, #c87941 0%, #a85d30 100%);
+    color: #fff;
 }
 
 .typing-dots {
@@ -1054,12 +1010,13 @@ body {
     overflow-y: auto;
     opacity: 0;
     visibility: hidden;
-    transition: opacity var(--t-normal), visibility var(--t-normal);
+    transition: opacity var(--t-normal), visibility 0s linear 250ms;
 }
 
 .settings-overlay.open {
     opacity: 1;
     visibility: visible;
+    transition: opacity var(--t-normal), visibility 0s linear 0s;
 }
 
 .settings-panel {
@@ -1144,8 +1101,7 @@ body {
 }
 
 #tabModel {
-    max-height: 55vh;
-    overflow-y: auto;
+    /* 由外层 .settings-body 统一管理滚动，避免双重滚动条 */
 }
 
 .setting-group {
@@ -1628,12 +1584,15 @@ body {
     justify-content: center;
     opacity: 0;
     pointer-events: none;
-    transition: opacity var(--t-normal) var(--ease);
+    transition: opacity var(--t-normal) var(--ease), visibility 0s linear 250ms;
+    visibility: hidden;
 }
 
 .kb-overlay.open {
     opacity: 1;
     pointer-events: auto;
+    visibility: visible;
+    transition: opacity var(--t-normal) var(--ease), visibility 0s linear 0s;
 }
 
 .kb-panel {
@@ -1782,6 +1741,12 @@ body {
     opacity: 1;
 }
 
+.kb-file-delete:focus-visible {
+    opacity: 1;
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 .kb-file-delete:hover {
     color: var(--red);
     background: var(--red-dim);
@@ -1799,7 +1764,7 @@ body {
    ============================================================ */
 .toast-container {
     position: fixed;
-    top: 20px;
+    top: calc(var(--topbar-h) + 12px);
     right: 20px;
     z-index: 300;
     display: flex;

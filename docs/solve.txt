@@ -522,3 +522,86 @@
 - `web/index.html`：preRetrievalSelect 改为多选组件，新增 topKSelect
 - `web/styles.css`：新增 `.multi-select-*` CSS
 - `web/app.js`：新增 `initMultiSelects()`、`getPreRetrievalValues()`、更新冲突检查和请求体构建
+
+---
+
+## 问题12：后端功能正确性 + 前端UX全面审查修复
+
+### 遇到的问题
+对后端进行功能正确性审查，对前端进行用户体验审查，发现多处问题。
+
+### 后端问题分析与修复
+
+**1. `embed_query`/`embed_documents` 失败返回空列表（高优先级）**
+- 问题：API 调用失败时返回 `[]`，传入 FAISS 后崩溃或返回无意义结果
+- 修复：改为抛出 `RuntimeError`，让调用方能感知失败
+
+**2. Reranker 用原始 `question` 而非改写后的 `current_query`（高优先级）**
+- 问题：开启 query rewrite 后，检索用改写词、rerank 用原词，语义不一致
+- 修复：`reranker.rerank()` 改为传入 `current_query`
+
+**3. HyDE + MQE + Hybrid 三者同时启用时 hybrid 是死代码（高优先级）**
+- 问题：`_retrieve_one` 在 MQE 分支内优先走 HyDE 路径，`elif hybrid` 永远不执行
+- 修复：新增 HyDE+Hybrid 组合路径，用 HyDE 向量做向量检索 + BM25 关键词检索 RRF 融合
+
+**4. 混合检索去重键前100字符易碰撞（高优先级）**
+- 问题：结构化文档多段落共享相同开头时误判为重复，静默丢弃不同文档
+- 修复：去重键扩展到前200字符
+
+**5. BM25 索引重复构建且数据不一致（高优先级）**
+- 问题：`init_vectorstore` 中 `create_vectorstore` 内部已建 BM25 并保存，但外部又用未清洗的 `texts` 重建
+- 修复：改为从 `create_vectorstore` 已保存的 pickle 文件加载 BM25 数据
+
+**6. `init_vectorstore` 直接访问 `kb_manager._loaded` 绕过锁（中优先级）**
+- 问题：线程不安全，并发请求可能看到不一致的缓存状态
+- 修复：改用 `kb_manager.put()` 公共方法
+
+**7. 流式响应消息保存不可靠（中优先级）**
+- 问题：`event_generator` 的消息保存代码在 yield 循环之后，客户端断开时可能不执行
+- 修复：将消息保存移入 `finally` 块
+
+### 前端问题分析与修复
+
+**1. 设置面板内下拉菜单被 `overflow-y: auto` 裁剪**
+- 问题：`.settings-body` 的 overflow 裁剪了绝对定位的下拉菜单
+- 修复：移除 `#tabModel` 的 `max-height` 和 `overflow-y`，由外层统一管理滚动
+
+**2. 双重滚动条**
+- 问题：`#tabModel` 和 `.settings-body` 都有 `overflow-y: auto`
+- 修复：移除 `#tabModel` 的独立滚动限制
+
+**3. 面板关闭动画被 `visibility: hidden` 截断**
+- 问题：关闭面板时 `visibility: hidden` 立即生效，面板缩放动画不可见
+- 修复：使用 `transition-delay` 延迟 `visibility` 的切换
+
+**4. Sources 面板切换方式不一致**
+- 问题：流式消息用 `style.display`，历史消息用 `classList.toggle`
+- 修复：统一使用 `classList.toggle('open')`
+
+**5. 流式响应时发送按钮状态误导**
+- 问题：响应中用户输入文字后按钮变亮可点，但点击无效
+- 修复：`isProcessing` 期间输入事件不更新按钮状态
+
+**6. Welcome 屏幕每次都播放动画**
+- 问题：快速切换会话时 welcome 反复 fadeInUp
+- 修复：`showWelcome(animate)` 参数控制，切换会话/KB 时传 `false`
+
+**7. 流式消息/打字指示器头像用内联样式**
+- 问题：内联样式与 CSS class 重复，维护脆弱
+- 修复：移除内联样式，使用 CSS class（`.typing-indicator .message-avatar`）
+
+**8. 其他 UX 修复**
+- `.chat-messages` 添加 `overflow-x: hidden` 防止 glow 水平溢出
+- `.kb-file-delete` 添加 `cursor: pointer` 和 `:focus-visible` 样式
+- `.session-item-delete` 添加 `:focus-visible` 样式
+- `.chip` 添加 `:focus-visible` 样式
+- Toast 容器 top 改为 `calc(var(--topbar-h) + 12px)` 避免与顶栏重叠
+- 图标按钮添加 `aria-label`（menuBtn、sendBtn、关闭按钮）
+- 侧边栏添加 `aria-label="侧边栏导航"`
+- 切换会话时使用平滑滚动 `scrollChatBottom(true)`
+
+### 主要改动
+- `backend/main_siliconflow_rag.py`：embeddings 异常处理、rerank query 修正、HyDE+Hybrid 路径、去重键扩展、BM25 一致性、线程安全、流式消息保存
+- `web/styles.css`：移除重复 CSS、修复 overflow/visibility/cursor/focus 样式、toast 位置、typing indicator 样式
+- `web/app.js`：sources 切换统一、发送按钮状态、welcome 动画控制、内联样式清理、平滑滚动
+- `web/index.html`：aria-label 无障碍改进
