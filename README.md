@@ -49,18 +49,57 @@
 │       ├── index.faiss / index.pkl     # FAISS 向量索引
 │       ├── bm25_index.pkl              # BM25 关键词索引
 │       └── materials/                  # 文档存放目录
-├── start.bat                           # 一键启动脚本
+├── start.bat                           # 一键启动脚本（本地运行）
+├── Dockerfile                          # Docker 镜像构建文件
+├── docker-compose.yml                  # Docker Compose 编排配置
+├── nginx.conf                          # Nginx 反向代理配置
+├── supervisord.conf                    # 进程管理配置
+├── .env.example                        # 环境变量模板
 └── README.md
 ```
 
 ## 快速开始
 
-### 环境要求
+### 方式一：Docker 部署（推荐）
+
+无需克隆项目，只需一个 API Key：
+
+```bash
+# 创建工作目录
+mkdir rag && cd rag
+
+# 创建 .env 配置文件
+echo "SILICONFLOW_API_KEY=你的API密钥" > .env
+
+# 启动服务
+docker run -d --name rag -p 80:80 \
+  --env-file .env \
+  -v ./knowledge_bases:/app/knowledge_bases \
+  ghcr.io/floaritay/rag-qa-system:main
+
+# 初始化知识库
+curl -X POST http://localhost/api/init
+```
+
+或使用 Docker Compose（需先下载 `docker-compose.yml`）：
+
+```bash
+curl -O https://raw.githubusercontent.com/floaritay/rag-qa-system/main/docker-compose.yml
+echo "SILICONFLOW_API_KEY=你的API密钥" > .env
+docker-compose up -d
+curl -X POST http://localhost/api/init
+```
+
+访问 http://localhost 即可使用。详见 [Docker 部署指南](./docs/DOCKER_DEPLOYMENT.md)。
+
+### 方式二：本地运行
+
+#### 环境要求
 
 - Python 3.10+
 - OpenAI 兼容的 API 密钥
 
-### 安装步骤
+#### 安装步骤
 
 1. **克隆项目**
 
@@ -222,6 +261,7 @@ python backend/evaluate.py
 
 ## 详细文档
 
+- [Docker 部署指南](./docs/DOCKER_DEPLOYMENT.md)
 - [Demo 演示指南](./docs/DEMO_GUIDE.md)
 - [部署指南](./docs/DEPLOYMENT_GUIDE.md)
 - [评估指南](./docs/EVALUATION_GUIDE.md)

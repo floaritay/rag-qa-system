@@ -1,0 +1,17 @@
+.git
+.github
+.trae
+__pycache__
+*.pyc
+.env
+knowledge_bases
+backend/sessions.db
+review
+program.md
+CLAUDE.md
+style.md
+style.txt
+demo
+images
+docs
+*.bat

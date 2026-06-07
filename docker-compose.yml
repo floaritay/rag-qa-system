@@ -1,0 +1,13 @@
+services:
+  rag:
+    image: ghcr.io/floaritay/rag-qa-system:main
+    # 本地开发时取消注释下面两行，注释上面的 image 行
+    # build: .
+    # image: rag-app:local
+    container_name: rag-app
+    ports:
+      - "80:80"
+    volumes:
+      - ./.env:/app/.env
+      - ./knowledge_bases:/app/knowledge_bases
+    restart: unless-stopped
