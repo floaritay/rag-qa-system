@@ -5,7 +5,13 @@ const API_URL = 'http://127.0.0.1:8001';
 // ============================================================
 let isProcessing = false;
 let currentSessionId = null;
-let currentKbId = 'default';
+let currentKbId = localStorage.getItem('currentKbId') || 'default';
+let abortController = null;
+
+function setCurrentKbId(id) {
+    currentKbId = id;
+    localStorage.setItem('currentKbId', id);
+}
 
 // ============================================================
 // DOM
@@ -63,6 +69,7 @@ const dom = {
     kbNameInput: $('kbNameInput'),
     kbCreateBtn: $('kbCreateBtn'),
     kbFilesTitle: $('kbFilesTitle'),
+    stopBtn: $('stopBtn'),
 };
 
 // ============================================================
@@ -562,6 +569,11 @@ function removeTypingIndicator() {
     if (el) el.remove();
 }
 
+function isNearBottom(threshold = 120) {
+    const el = dom.chatMessages;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+}
+
 function scrollChatBottom(smooth = false) {
     requestAnimationFrame(() => {
         if (smooth) {
@@ -580,6 +592,8 @@ async function askQuestion(question) {
 
     isProcessing = true;
     dom.sendBtn.disabled = true;
+    dom.sendBtn.hidden = true;
+    dom.stopBtn.hidden = false;
 
     addMessage(question, 'user');
     dom.questionInput.value = '';
@@ -587,6 +601,8 @@ async function askQuestion(question) {
     scrollChatBottom();
 
     addTypingIndicator();
+
+    abortController = new AbortController();
 
     try {
         // Auto-create session if needed
@@ -596,6 +612,7 @@ async function askQuestion(question) {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ title: '新对话', kb_id: currentKbId }),
+                    signal: abortController.signal,
                 });
                 if (sessRes.ok) {
                     const sess = await sessRes.json();
@@ -618,6 +635,7 @@ async function askQuestion(question) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
+            signal: abortController.signal,
         });
 
         removeTypingIndicator();
@@ -659,7 +677,7 @@ async function askQuestion(question) {
                         } else if (event.type === 'token') {
                             accumulated += event.data;
                             contentEl.innerHTML = renderMarkdown(accumulated);
-                            scrollChatBottom();
+                            if (isNearBottom()) scrollChatBottom();
                         } else if (event.type === 'error') {
                             accumulated = `[错误] ${event.data}`;
                             contentEl.innerHTML = `<p style="color: var(--red);">请求失败：${escapeHtml(event.data)}</p>`;
@@ -677,15 +695,27 @@ async function askQuestion(question) {
         }
     } catch (error) {
         removeTypingIndicator();
-        if (error.message?.includes('Failed to fetch')) {
+        if (error.name === 'AbortError') {
+            // User stopped generation — append indicator to last message
+            const lastContent = dom.chatMessages.querySelector('.message.assistant:last-of-type .message-content');
+            if (lastContent) {
+                const stopped = document.createElement('span');
+                stopped.className = 'generation-stopped';
+                stopped.textContent = ' [已停止]';
+                lastContent.appendChild(stopped);
+            }
+        } else if (error.message?.includes('Failed to fetch')) {
             addErrorMessage('无法连接到后端服务，请确认后端已启动');
         } else {
             addErrorMessage(`发生错误：${error.message}`);
         }
     }
 
+    abortController = null;
     scrollChatBottom();
     isProcessing = false;
+    dom.sendBtn.hidden = false;
+    dom.stopBtn.hidden = true;
     dom.sendBtn.disabled = !dom.questionInput.value.trim();
     dom.questionInput.focus();
 }
@@ -752,6 +782,10 @@ async function loadKnowledgeBases() {
 }
 
 function renderKbSelector(kbs) {
+    // 如果保存的 KB 不存在，回退到默认
+    if (kbs.length > 0 && !kbs.find(k => k.id === currentKbId)) {
+        setCurrentKbId('default');
+    }
     dom.kbSelectMenu.innerHTML = '';
     kbs.forEach(kb => {
         const opt = document.createElement('div');
@@ -773,7 +807,7 @@ function renderKbSelector(kbs) {
 }
 
 async function switchKnowledgeBase(kbId) {
-    currentKbId = kbId;
+    setCurrentKbId(kbId);
     currentSessionId = null;
     dom.kbSelect.dataset.value = kbId;
     // Close dropdown
@@ -878,7 +912,7 @@ function renderKbList(kbs) {
 }
 
 function selectKbInPanel(kbId) {
-    currentKbId = kbId;
+    setCurrentKbId(kbId);
     currentSessionId = null;
     // Update active state in list
     dom.kbList.querySelectorAll('.kb-list-item').forEach(el => el.classList.remove('active'));
@@ -911,7 +945,7 @@ async function createKnowledgeBase() {
             const kb = await res.json();
             dom.kbNameInput.value = '';
             showToast(`知识库 "${name}" 创建成功`, 'success');
-            currentKbId = kb.id;
+            setCurrentKbId(kb.id);
             await loadKnowledgeBases();
             await loadKnowledgeBasesForPanel();
             await loadMaterialFiles();
@@ -931,7 +965,7 @@ async function deleteKnowledgeBase(kbId, kbName) {
         if (res.ok) {
             showToast(`已删除: ${kbName}`, 'success');
             if (currentKbId === kbId) {
-                currentKbId = 'default';
+                setCurrentKbId('default');
                 currentSessionId = null;
                 showWelcome(false);
             }
@@ -1125,8 +1159,9 @@ function initCustomSelects() {
                 // Close dropdown
                 select.classList.remove('open');
 
-                // Check conflicts
+                // Check conflicts & persist
                 updateStrategyConstraints();
+                saveStrategy();
             });
         });
     });
@@ -1160,6 +1195,7 @@ function initMultiSelects() {
                 option.classList.toggle('checked', cb.checked);
                 updateMultiSelectLabel(select);
                 updateStrategyConstraints();
+                saveStrategy();
             });
         });
     });
@@ -1180,6 +1216,76 @@ function getPreRetrievalValues() {
     const select = document.getElementById('preRetrievalSelect');
     const checked = select.querySelectorAll('input[type="checkbox"]:checked');
     return Array.from(checked).map(cb => cb.value);
+}
+
+// 检索策略持久化
+function saveStrategy() {
+    const strategy = {
+        retrieval: getSelectValue('retrievalStrategySelect'),
+        preRetrieval: getPreRetrievalValues(),
+        postRetrieval: getSelectValue('postRetrievalSelect'),
+        topK: getSelectValue('topKSelect'),
+    };
+    localStorage.setItem('retrievalStrategy', JSON.stringify(strategy));
+}
+
+function loadStrategy() {
+    try {
+        const raw = localStorage.getItem('retrievalStrategy');
+        if (!raw) return null;
+        const s = JSON.parse(raw);
+
+        // 恢复检索方式
+        if (s.retrieval) {
+            const sel = document.getElementById('retrievalStrategySelect');
+            const opt = sel.querySelector(`.custom-select-option[data-value="${s.retrieval}"]`);
+            if (opt) {
+                sel.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+                sel.dataset.value = s.retrieval;
+                sel.querySelector('.custom-select-label').textContent = opt.querySelector('.option-label').textContent;
+            }
+        }
+
+        // 恢复预检索优化（多选）
+        if (s.preRetrieval && Array.isArray(s.preRetrieval)) {
+            const sel = document.getElementById('preRetrievalSelect');
+            sel.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.checked = s.preRetrieval.includes(cb.value);
+                cb.closest('.custom-select-option').classList.toggle('checked', cb.checked);
+            });
+            updateMultiSelectLabel(sel);
+        }
+
+        // 恢复后检索优化
+        if (s.postRetrieval) {
+            const sel = document.getElementById('postRetrievalSelect');
+            const opt = sel.querySelector(`.custom-select-option[data-value="${s.postRetrieval}"]`);
+            if (opt) {
+                sel.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+                sel.dataset.value = s.postRetrieval;
+                sel.querySelector('.custom-select-label').textContent = opt.querySelector('.option-label').textContent;
+            }
+        }
+
+        // 恢复 Top-K
+        if (s.topK) {
+            const sel = document.getElementById('topKSelect');
+            const opt = sel.querySelector(`.custom-select-option[data-value="${s.topK}"]`);
+            if (opt) {
+                sel.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+                sel.dataset.value = s.topK;
+                sel.querySelector('.custom-select-label').textContent = opt.querySelector('.option-label').textContent;
+            }
+        }
+
+        updateStrategyConstraints();
+        return s;
+    } catch {
+        return null;
+    }
 }
 
 // ============================================================
@@ -1452,6 +1558,9 @@ document.querySelectorAll('.toggle-key-btn').forEach(btn => {
 // Event Binding
 // ============================================================
 dom.sendBtn.addEventListener('click', () => askQuestion(dom.questionInput.value));
+dom.stopBtn.addEventListener('click', () => {
+    if (abortController) abortController.abort();
+});
 dom.questionInput.addEventListener('keydown', handleKeyDown);
 dom.questionInput.addEventListener('input', () => {
     autoResize();
@@ -1520,22 +1629,102 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ============================================================
+// Option Info Tooltip (position:fixed, 不被 overflow 裁剪)
+// ============================================================
+function initOptionInfoTooltips() {
+    const tooltip = document.createElement('div');
+    tooltip.className = 'option-info-tip';
+    document.body.appendChild(tooltip);
+
+    function showTip(el) {
+        tooltip.textContent = el.dataset.infoTip;
+        const rect = el.getBoundingClientRect();
+        // 先显示以获取尺寸
+        tooltip.style.left = '0px';
+        tooltip.style.top = '0px';
+        tooltip.classList.add('visible');
+        const tipW = tooltip.offsetWidth;
+        const tipH = tooltip.offsetHeight;
+        // 默认在元素上方右对齐
+        let left = rect.right - tipW;
+        let top = rect.top - tipH - 8;
+        // 边界修正
+        if (left < 8) left = 8;
+        if (left + tipW > window.innerWidth - 8) left = window.innerWidth - tipW - 8;
+        if (top < 8) {
+            // 上方空间不够，显示在下方
+            top = rect.bottom + 8;
+        }
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = top + 'px';
+    }
+
+    function hideTip() {
+        tooltip.classList.remove('visible');
+    }
+
+    // 绑定所有已有和未来的 .option-info[data-tip]
+    function bindAll() {
+        document.querySelectorAll('.option-info[data-tip]').forEach(el => {
+            if (el.dataset.infoTipBound) return;
+            el.dataset.infoTipBound = '1';
+            el.dataset.infoTip = el.getAttribute('data-tip');
+            el.removeAttribute('data-tip'); // 移除 CSS ::after 用的属性
+            el.addEventListener('mouseenter', () => showTip(el));
+            el.addEventListener('mouseleave', hideTip);
+            el.addEventListener('focus', () => showTip(el));
+            el.addEventListener('blur', hideTip);
+        });
+    }
+
+    bindAll();
+    // MutationObserver 处理动态添加的元素
+    const observer = new MutationObserver(bindAll);
+    observer.observe(document.body, { childList: true, subtree: true });
+}
+
+// ============================================================
 // Init
 // ============================================================
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('[KB] DOMContentLoaded fired');
-    console.log('[KB] kbManageBtn:', dom.kbManageBtn);
-    console.log('[KB] kbOverlay:', dom.kbOverlay);
-    console.log('[KB] kbList:', dom.kbList);
-    console.log('[KB] kbSelect:', dom.kbSelect);
+document.addEventListener('DOMContentLoaded', async () => {
     dom.questionInput.focus();
     checkHealth();
-    loadKnowledgeBases();
+
+    // 先加载知识库列表，后端未就绪时自动重试
+    let kbLoaded = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+        await loadKnowledgeBases();
+        // 检查是否成功获取到知识库列表
+        if (dom.kbSelectMenu.children.length > 0) {
+            kbLoaded = true;
+            break;
+        }
+        await new Promise(r => setTimeout(r, 1000));
+    }
+    if (!kbLoaded) {
+        console.warn('[KB] 知识库列表加载失败，后端可能未就绪');
+    }
+
     loadSessionList();
     bindChipClicks();
     updateMenuArrow();
     initCustomSelects();
     initMultiSelects();
+    const strategy = loadStrategy();  // 恢复检索策略选择
+
+    // 加载配置完成提示
+    if (strategy) {
+        const parts = [];
+        const retrievalLabels = { default: '向量检索', hybrid: '混合检索' };
+        const postLabels = { none: '无', rerank: '重排序' };
+        if (strategy.retrieval) parts.push(retrievalLabels[strategy.retrieval] || strategy.retrieval);
+        if (strategy.preRetrieval?.length) parts.push(`预检索: ${strategy.preRetrieval.join('+')}`);
+        if (strategy.postRetrieval && strategy.postRetrieval !== 'none') parts.push(`后检索: ${postLabels[strategy.postRetrieval] || strategy.postRetrieval}`);
+        if (strategy.topK) parts.push(`Top-${strategy.topK}`);
+        if (parts.length) showToast(`已恢复配置: ${parts.join(' · ')}`, 'info');
+    }
+
     initMiniToggles();
+    initOptionInfoTooltips();
     setInterval(checkHealth, 30000);
 });

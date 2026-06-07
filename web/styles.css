@@ -985,6 +985,33 @@ body {
     cursor: not-allowed;
 }
 
+.stop-btn {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-md);
+    cursor: pointer;
+    transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+
+.stop-btn:hover {
+    background: var(--red-dim);
+    color: var(--red);
+    border-color: var(--red);
+}
+
+.generation-stopped {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
 .input-hint {
     text-align: center;
     font-size: 11px;
@@ -1496,12 +1523,9 @@ body {
     border-color: var(--accent);
 }
 
-/* Floating tooltip on info icon */
-.option-info::after {
-    content: attr(data-tip);
-    position: absolute;
-    bottom: calc(100% + 8px);
-    right: -4px;
+/* Floating tooltip — position:fixed, 脱离 overflow 容器裁剪 */
+.option-info-tip {
+    position: fixed;
     width: 240px;
     padding: 10px 12px;
     background: var(--bg-base);
@@ -1513,14 +1537,14 @@ body {
     line-height: 1.5;
     white-space: normal;
     pointer-events: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 999;
     opacity: 0;
     transform: translateY(4px);
     transition: opacity var(--t-fast), transform var(--t-fast);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    z-index: 20;
 }
 
-.option-info:hover::after {
+.option-info-tip.visible {
     opacity: 1;
     transform: translateY(0);
 }

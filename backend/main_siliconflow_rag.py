@@ -1899,6 +1899,7 @@ async def list_materials(kb_id: str = "default"):
     try:
         materials_path = kb_manager.get_materials_path(kb_id)
         if not os.path.isdir(materials_path):
+            print(f"[materials] 目录不存在: {materials_path} (kb_id={kb_id})")
             return {"status": "success", "files": []}
 
         files = []
