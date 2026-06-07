@@ -1,5 +1,16 @@
 const API_URL = window.__API_URL__ || 'http://127.0.0.1:8001';
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(url, { ...options, signal: controller.signal });
+        return res;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 // ============================================================
 // State
 // ============================================================
@@ -110,7 +121,10 @@ function renderMarkdown(text) {
         html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
 
         // Links
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+            const safeUrl = /^(https?|mailto):/i.test(url) ? url : 'about:blank';
+            return `<a href="${safeUrl}" target="_blank" rel="noopener">${text}</a>`;
+        });
 
         // Unordered lists
         html = html.replace(/(?:^|\n)((?:[-*] .+\n?)+)/g, (match, list) => {
@@ -176,7 +190,7 @@ function removeLoadingToast() {
 // ============================================================
 async function checkHealth() {
     try {
-        const res = await fetch(`${API_URL}/health`);
+        const res = await fetchWithTimeout(`${API_URL}/health`, {}, 5000);
         if (res.ok) {
             dom.healthIndicator.className = 'topbar-status online';
             dom.healthIndicator.querySelector('.status-text').textContent = '在线';
@@ -227,7 +241,7 @@ async function loadSessionList() {
         const data = await res.json();
         renderSessionList(data.sessions || []);
     } catch {
-        // silent
+        console.warn('加载会话列表失败');
     }
 }
 
@@ -356,7 +370,11 @@ async function switchSession(sessionId) {
 
 async function deleteSession(sessionId) {
     try {
-        await fetch(`${API_URL}/sessions/${sessionId}`, { method: 'DELETE' });
+        const res = await fetch(`${API_URL}/sessions/${sessionId}`, { method: 'DELETE' });
+        if (!res.ok) {
+            showToast('删除会话失败', 'error');
+            return;
+        }
         if (currentSessionId === sessionId) {
             currentSessionId = null;
             dom.topbarTitle.textContent = '个人知识库';
@@ -395,7 +413,7 @@ function addMessage(content, type, animate = true, sources = null) {
     if (!animate) msg.style.animation = 'none';
 
     const avatarLabel = type === 'user' ? '你' : 'AI';
-    const roleLabel = type === 'user' ? 'You' : 'Assistant';
+    const roleLabel = type === 'user' ? '你' : 'AI';
 
     const renderedContent = type === 'assistant' ? renderMarkdown(content) : `<p>${escapeHtml(content)}</p>`;
 
@@ -407,7 +425,6 @@ function addMessage(content, type, animate = true, sources = null) {
 
             const badges = [];
             if (s.vector_score != null) {
-                const label = s.vector_score < 1 ? '优' : s.vector_score < 2 ? '良' : '一般';
                 badges.push(`<span class="source-badge score-vector" title="FAISS L2 距离，越小越相关">距离 ${s.vector_score.toFixed(2)}</span>`);
             }
             if (s.rrf_score != null) {
@@ -754,7 +771,6 @@ function formatFileSize(bytes) {
 }
 
 function openKbPanel() {
-    console.log('[KB] openKbPanel called');
     dom.kbOverlay.classList.add('open');
     loadKnowledgeBasesForPanel();
     loadMaterialFiles();
@@ -769,12 +785,9 @@ function closeKbPanel() {
 // ============================================================
 async function loadKnowledgeBases() {
     try {
-        console.log('[KB] loadKnowledgeBases: fetching...');
         const res = await fetch(`${API_URL}/knowledge-bases`);
-        console.log('[KB] loadKnowledgeBases: status', res.status);
         if (!res.ok) return;
         const data = await res.json();
-        console.log('[KB] loadKnowledgeBases: data', data);
         renderKbSelector(data.knowledge_bases || []);
     } catch (e) {
         console.error('[KB] loadKnowledgeBases error:', e);
@@ -852,12 +865,9 @@ function showWelcome(animate = true) {
 
 async function loadKnowledgeBasesForPanel() {
     try {
-        console.log('[KB] loadKnowledgeBasesForPanel: fetching...');
         const res = await fetch(`${API_URL}/knowledge-bases`);
-        console.log('[KB] loadKnowledgeBasesForPanel: status', res.status);
         if (!res.ok) return;
         const data = await res.json();
-        console.log('[KB] loadKnowledgeBasesForPanel: data', data);
         renderKbList(data.knowledge_bases || []);
     } catch (e) {
         console.error('[KB] loadKnowledgeBasesForPanel error:', e);
@@ -865,7 +875,6 @@ async function loadKnowledgeBasesForPanel() {
 }
 
 function renderKbList(kbs) {
-    console.log('[KB] renderKbList:', kbs.length, 'items');
     dom.kbList.innerHTML = '';
     kbs.forEach(kb => {
         const item = document.createElement('div');
@@ -1405,7 +1414,7 @@ async function loadConfig() {
 
         // SiliconFlow API key
         dom.sfApiKey.value = '';
-        dom.sfApiKey.placeholder = cfg.siliconflow_api_key || '未设置';
+        dom.sfApiKey.placeholder = cfg.siliconflow_api_key ? '***已设置' : '未设置';
 
         // Detect per-model provider from base_url
         const isSF = (url) => url && url.includes('siliconflow');
@@ -1431,7 +1440,7 @@ async function loadConfig() {
             dom.cfgLlmModel.value = cfg.llm?.model || '';
             dom.cfgLlmBaseUrl.value = cfg.llm?.base_url || '';
             dom.cfgLlmApiKey.value = '';
-            dom.cfgLlmApiKey.placeholder = cfg.llm?.api_key || '输入 API Key';
+            dom.cfgLlmApiKey.placeholder = cfg.llm?.api_key ? '***已设置' : '输入 API Key';
         } else {
             dom.cfgLlmModel.value = '';
             dom.cfgLlmBaseUrl.value = '';
@@ -1444,7 +1453,7 @@ async function loadConfig() {
             dom.cfgEmbModel.value = cfg.embedding?.model || '';
             dom.cfgEmbBaseUrl.value = cfg.embedding?.base_url || '';
             dom.cfgEmbApiKey.value = '';
-            dom.cfgEmbApiKey.placeholder = cfg.embedding?.api_key || '输入 API Key';
+            dom.cfgEmbApiKey.placeholder = cfg.embedding?.api_key ? '***已设置' : '输入 API Key';
         } else {
             dom.cfgEmbModel.value = '';
             dom.cfgEmbBaseUrl.value = '';
@@ -1457,7 +1466,7 @@ async function loadConfig() {
             dom.cfgRerankerModel.value = cfg.reranker?.model || '';
             dom.cfgRerankerBaseUrl.value = cfg.reranker?.base_url || '';
             dom.cfgRerankerApiKey.value = '';
-            dom.cfgRerankerApiKey.placeholder = cfg.reranker?.api_key || '输入 API Key';
+            dom.cfgRerankerApiKey.placeholder = cfg.reranker?.api_key ? '***已设置' : '输入 API Key';
         } else {
             dom.cfgRerankerModel.value = '';
             dom.cfgRerankerBaseUrl.value = '';
@@ -1465,8 +1474,8 @@ async function loadConfig() {
             dom.cfgRerankerBaseUrl.placeholder = '例如 https://api.openai.com/v1';
             dom.cfgRerankerApiKey.placeholder = '输入 API Key';
         }
-    } catch {
-        // silent
+    } catch (e) {
+        console.warn('加载配置失败:', e);
     }
 }
 
@@ -1588,9 +1597,7 @@ dom.modelSettingsOverlay.addEventListener('click', (e) => {
 dom.saveConfigBtn.addEventListener('click', saveConfig);
 
 // Knowledge Base Management
-console.log('[KB] Binding kbManageBtn click handler, element:', dom.kbManageBtn);
 dom.kbManageBtn.addEventListener('click', () => {
-    console.log('[KB] kbManageBtn clicked!');
     openKbPanel();
 });
 dom.kbClose.addEventListener('click', closeKbPanel);

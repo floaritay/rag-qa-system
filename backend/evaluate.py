@@ -14,19 +14,21 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 # 导入后端模块
-from backend.main import (
+from backend.main_siliconflow_rag import (
+    init_shared_models,
     init_vectorstore,
-    retriever as main_retriever
+    hybrid_retrieve
 )
 
 class RAGEvaluator:
     def __init__(self):
         print("初始化评估器...")
+        if not init_shared_models():
+            raise Exception("共享模型初始化失败，请检查 API Key 配置")
         success = init_vectorstore()
         if not success:
             raise Exception("知识库初始化失败，请确保course_knowledge_base目录存在且有效")
-        
-        self.retriever = main_retriever
+
         print("评估器初始化完成")
     
     def evaluate_precision_at_k(self, query: str, relevant_keywords: List[str], k: int = 3) -> float:
@@ -44,11 +46,11 @@ class RAGEvaluator:
             precision: 精确率 (0-1之间)
         """
         try:
-            docs = self.retriever.invoke(query)[:k]
-            
+            docs = hybrid_retrieve(query, k)
+
             if not docs:
                 return 0.0
-            
+
             relevant_count = 0
             for doc in docs:
                 content = doc.page_content.lower()
@@ -78,8 +80,8 @@ class RAGEvaluator:
             recall: 召回率 (0-1之间)
         """
         try:
-            docs = self.retriever.invoke(query)[:k]
-            
+            docs = hybrid_retrieve(query, k)
+
             if not docs or not relevant_keywords:
                 return 0.0
             
@@ -191,9 +193,9 @@ if __name__ == "__main__":
     print("启动RAG系统评估...")
 
     # 设置环境变量（如果需要）
-    if not os.getenv("LLM_API_KEY"):
-        print("警告: 请先设置LLM_API_KEY环境变量")
-        print("使用方式: 在项目根目录创建 .env 文件并设置 LLM_API_KEY=你的API密钥")
+    if not os.getenv("SILICONFLOW_API_KEY") and not os.getenv("LLM_API_KEY"):
+        print("警告: 请先设置 API Key 环境变量")
+        print("使用方式: 在项目根目录创建 .env 文件并设置 SILICONFLOW_API_KEY=你的API密钥")
         sys.exit(1)
     
     try:

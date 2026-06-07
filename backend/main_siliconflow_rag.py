@@ -24,6 +24,7 @@ from rank_bm25 import BM25Okapi
 import os
 import shutil
 import threading
+from contextlib import contextmanager
 import uvicorn
 import requests
 from dotenv import load_dotenv
@@ -35,7 +36,7 @@ app = FastAPI(title="知识库API（检索优化版）")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -52,6 +53,7 @@ VECTOR_WEIGHT = 0.7       # 混合检索中向量检索权重
 BM25_WEIGHT = 0.3          # 混合检索中 BM25 权重
 HYBRID_CANDIDATE_K = 15    # 混合检索候选数量
 DEFAULT_TOP_K = 3          # 最终返回文档数
+MAX_UPLOAD_SIZE_MB = 50  # 单文件上传大小限制 (MB)
 
 # ============================================================
 # Pydantic 模型
@@ -63,9 +65,9 @@ def _normalize_pre_retrieval(v):
     if v is None or v == "none":
         return []
     if isinstance(v, str):
-        return [] if v == "none" else [v]
+        return [v] if v in ORDER else []
     if isinstance(v, list):
-        cleaned = [x for x in v if x and x != "none"]
+        cleaned = [x for x in v if x and x != "none" and x in ORDER]
         return [s for s in ORDER if s in cleaned]
     return []
 
@@ -286,6 +288,7 @@ MQE_PROMPT = """你是一个检索优化助手。请根据以下用户问题，�
 embeddings = None
 llm = None
 reranker = None
+_config_lock = threading.Lock()
 
 # 硅基流动共享配置（所有 SF 模型共用 base_url 和 api_key）
 SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
@@ -437,6 +440,7 @@ class KBManager:
         self._max_loaded = max_loaded
         self._access_order = []    # LRU 追踪
         self._lock = threading.Lock()
+        self._registry_lock = threading.Lock()
 
     @staticmethod
     def _to_slug(kb_id: str) -> str:
@@ -494,13 +498,14 @@ class KBManager:
 
     def create_kb(self, name: str, description: str = "") -> dict:
         slug = self._to_slug(name)
-        registry = self.load_registry()
-        if slug in registry:
-            slug = f"{slug}{int(time.time()) % 10000}"
-        now = datetime.now().isoformat()
-        info = {"id": slug, "name": name, "created_at": now, "updated_at": now, "description": description}
-        registry[slug] = info
-        self.save_registry(registry)
+        with self._registry_lock:
+            registry = self.load_registry()
+            if slug in registry:
+                slug = f"{slug}{int(time.time()) % 10000}"
+            now = datetime.now().isoformat()
+            info = {"id": slug, "name": name, "created_at": now, "updated_at": now, "description": description}
+            registry[slug] = info
+            self.save_registry(registry)
         kb_path = self.get_kb_path(slug)
         os.makedirs(os.path.join(kb_path, "materials"), exist_ok=True)
         return info
@@ -508,11 +513,12 @@ class KBManager:
     def delete_kb(self, kb_id: str) -> bool:
         if kb_id == "default":
             return False
-        registry = self.load_registry()
-        if kb_id not in registry:
-            return False
-        del registry[kb_id]
-        self.save_registry(registry)
+        with self._registry_lock:
+            registry = self.load_registry()
+            if kb_id not in registry:
+                return False
+            del registry[kb_id]
+            self.save_registry(registry)
         self.invalidate(kb_id)
         kb_path = self.get_kb_path(kb_id)
         if os.path.isdir(kb_path):
@@ -520,15 +526,16 @@ class KBManager:
         return True
 
     def update_kb(self, kb_id: str, name: str = None, description: str = None) -> bool:
-        registry = self.load_registry()
-        if kb_id not in registry:
-            return False
-        if name is not None:
-            registry[kb_id]["name"] = name
-        if description is not None:
-            registry[kb_id]["description"] = description
-        registry[kb_id]["updated_at"] = datetime.now().isoformat()
-        self.save_registry(registry)
+        with self._registry_lock:
+            registry = self.load_registry()
+            if kb_id not in registry:
+                return False
+            if name is not None:
+                registry[kb_id]["name"] = name
+            if description is not None:
+                registry[kb_id]["description"] = description
+            registry[kb_id]["updated_at"] = datetime.now().isoformat()
+            self.save_registry(registry)
         return True
 
     def get(self, kb_id: str) -> dict:
@@ -626,140 +633,133 @@ kb_manager = None
 # SQLite 数据库函数
 # ============================================================
 
+@contextmanager
 def get_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 def init_db():
-    conn = get_db()
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            session_id TEXT PRIMARY KEY,
-            kb_id TEXT DEFAULT 'default',
-            title TEXT DEFAULT '新对话',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            summary TEXT DEFAULT NULL
-        );
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
-    """)
-    # 迁移：为已有数据库添加 kb_id 列
-    columns = [row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()]
-    if "kb_id" not in columns:
-        conn.execute("ALTER TABLE sessions ADD COLUMN kb_id TEXT DEFAULT 'default'")
-        print("数据库迁移：添加 sessions.kb_id 列")
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                kb_id TEXT DEFAULT 'default',
+                title TEXT DEFAULT '新对话',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                summary TEXT DEFAULT NULL
+            );
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+        """)
+        # 迁移：为已有数据库添加 kb_id 列
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+        if "kb_id" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN kb_id TEXT DEFAULT 'default'")
+            print("数据库迁移：添加 sessions.kb_id 列")
+        conn.commit()
     print("数据库初始化完成")
 
 def create_session(session_id: str, title: str = "新对话", kb_id: str = "default") -> dict:
     now = datetime.now().isoformat()
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO sessions (session_id, kb_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        (session_id, kb_id, title, now, now)
-    )
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO sessions (session_id, kb_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (session_id, kb_id, title, now, now)
+        )
+        conn.commit()
     return {"session_id": session_id, "kb_id": kb_id, "title": title, "created_at": now, "updated_at": now}
 
 def get_session(session_id: str) -> Optional[dict]:
-    conn = get_db()
-    row = conn.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
-    conn.close()
-    if row:
-        return dict(row)
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
+        if row:
+            return dict(row)
     return None
 
 def list_sessions(kb_id: Optional[str] = None) -> List[dict]:
-    conn = get_db()
-    if kb_id:
-        rows = conn.execute("""
-            SELECT s.*, COUNT(m.id) as message_count
-            FROM sessions s
-            LEFT JOIN messages m ON s.session_id = m.session_id
-            WHERE s.kb_id = ?
-            GROUP BY s.session_id
-            ORDER BY s.updated_at DESC
-        """, (kb_id,)).fetchall()
-    else:
-        rows = conn.execute("""
-            SELECT s.*, COUNT(m.id) as message_count
-            FROM sessions s
-            LEFT JOIN messages m ON s.session_id = m.session_id
-            GROUP BY s.session_id
-            ORDER BY s.updated_at DESC
-        """).fetchall()
-    conn.close()
+    with get_db() as conn:
+        if kb_id:
+            rows = conn.execute("""
+                SELECT s.*, COUNT(m.id) as message_count
+                FROM sessions s
+                LEFT JOIN messages m ON s.session_id = m.session_id
+                WHERE s.kb_id = ?
+                GROUP BY s.session_id
+                ORDER BY s.updated_at DESC
+            """, (kb_id,)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT s.*, COUNT(m.id) as message_count
+                FROM sessions s
+                LEFT JOIN messages m ON s.session_id = m.session_id
+                GROUP BY s.session_id
+                ORDER BY s.updated_at DESC
+            """).fetchall()
     return [dict(r) for r in rows]
 
 def delete_session(session_id: str) -> bool:
-    conn = get_db()
-    cursor = conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
-    deleted = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        deleted = cursor.rowcount > 0
+        conn.commit()
     return deleted
 
 def add_message(session_id: str, role: str, content: str):
     now = datetime.now().isoformat()
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-        (session_id, role, content, now)
-    )
-    conn.execute(
-        "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
-        (now, session_id)
-    )
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, role, content, now)
+        )
+        conn.execute(
+            "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
+            (now, session_id)
+        )
+        conn.commit()
 
 def get_recent_messages(session_id: str, limit: int = 20) -> List[dict]:
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?",
-        (session_id, limit)
-    ).fetchall()
-    conn.close()
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+            (session_id, limit)
+        ).fetchall()
     return [dict(r) for r in reversed(rows)]
 
 def get_message_count(session_id: str) -> int:
-    conn = get_db()
-    row = conn.execute("SELECT COUNT(*) as cnt FROM messages WHERE session_id = ?", (session_id,)).fetchone()
-    conn.close()
+    with get_db() as conn:
+        row = conn.execute("SELECT COUNT(*) as cnt FROM messages WHERE session_id = ?", (session_id,)).fetchone()
     return row["cnt"] if row else 0
 
 def update_session_title(session_id: str, title: str):
-    conn = get_db()
-    conn.execute("UPDATE sessions SET title = ? WHERE session_id = ?", (title, session_id))
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        conn.execute("UPDATE sessions SET title = ? WHERE session_id = ?", (title, session_id))
+        conn.commit()
 
 def update_session_summary(session_id: str, summary: str):
-    conn = get_db()
-    conn.execute("UPDATE sessions SET summary = ? WHERE session_id = ?", (summary, session_id))
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        conn.execute("UPDATE sessions SET summary = ? WHERE session_id = ?", (summary, session_id))
+        conn.commit()
 
 def cleanup_old_sessions(max_age_days: int = SESSION_MAX_AGE_DAYS) -> int:
     cutoff = (datetime.now() - timedelta(days=max_age_days)).isoformat()
-    conn = get_db()
-    cursor = conn.execute("DELETE FROM sessions WHERE updated_at < ?", (cutoff,))
-    deleted = cursor.rowcount
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM sessions WHERE updated_at < ?", (cutoff,))
+        deleted = cursor.rowcount
+        conn.commit()
     return deleted
 
 # ============================================================
@@ -871,8 +871,6 @@ def create_vectorstore(texts, kb_id="default"):
     if not embedding_api_key:
         print("错误：未设置EMBEDDING_API_KEY环境变量")
         return None
-
-    from langchain_core.documents import Document
 
     if texts and not isinstance(texts[0], Document):
         print("警告：texts不是Document对象列表，尝试转换")
@@ -1650,18 +1648,22 @@ def mask_key(key):
 
 def save_env_file():
     """Save current config to .env file, preserving comments and formatting"""
+    def _sanitize_env_val(v):
+        """Remove newlines to prevent env var injection"""
+        return (v or "").replace("\n", "").replace("\r", "")
+
     env_path = os.path.join(base_dir, ".env")
     updates = {
-        "SILICONFLOW_API_KEY": siliconflow_api_key or "",
-        "LLM_API_KEY": llm_api_key or "",
-        "LLM_BASE_URL": llm_base_url,
-        "LLM_MODEL": llm_model,
-        "EMBEDDING_API_KEY": embedding_api_key or "",
-        "EMBEDDING_BASE_URL": embedding_base_url,
-        "EMBEDDING_MODEL": embedding_model_name,
-        "RERANKER_MODEL": RERANKER_MODEL,
-        "RERANKER_API_KEY": reranker_api_key or "",
-        "RERANKER_BASE_URL": reranker_base_url,
+        "SILICONFLOW_API_KEY": _sanitize_env_val(siliconflow_api_key),
+        "LLM_API_KEY": _sanitize_env_val(llm_api_key),
+        "LLM_BASE_URL": _sanitize_env_val(llm_base_url),
+        "LLM_MODEL": _sanitize_env_val(llm_model),
+        "EMBEDDING_API_KEY": _sanitize_env_val(embedding_api_key),
+        "EMBEDDING_BASE_URL": _sanitize_env_val(embedding_base_url),
+        "EMBEDDING_MODEL": _sanitize_env_val(embedding_model_name),
+        "RERANKER_MODEL": _sanitize_env_val(RERANKER_MODEL),
+        "RERANKER_API_KEY": _sanitize_env_val(reranker_api_key),
+        "RERANKER_BASE_URL": _sanitize_env_val(reranker_base_url),
     }
     updated_keys = set()
 
@@ -1718,79 +1720,80 @@ async def update_config(request: dict):
 
     global siliconflow_api_key
 
-    sf_key = request.get("siliconflow_api_key", "")
-    if sf_key and not sf_key.startswith("***"):
-        siliconflow_api_key = sf_key
+    with _config_lock:
+        sf_key = request.get("siliconflow_api_key", "")
+        if sf_key and not sf_key.startswith("***"):
+            siliconflow_api_key = sf_key
 
-    # 优先使用新格式 models，回退到顶层 llm/embedding/reranker
-    models = request.get("models", {})
-    llm_cfg = models.get("llm") or request.get("llm", {})
-    emb_cfg = models.get("embedding") or request.get("embedding", {})
-    rer_cfg = models.get("reranker") or request.get("reranker", {})
+        # 优先使用新格式 models，回退到顶层 llm/embedding/reranker
+        models = request.get("models", {})
+        llm_cfg = models.get("llm") or request.get("llm", {})
+        emb_cfg = models.get("embedding") or request.get("embedding", {})
+        rer_cfg = models.get("reranker") or request.get("reranker", {})
 
-    def resolve_key(cfg, existing_key):
-        """解析 API key：显式指定 > 硅基流动共享 key > 保留现有"""
-        k = cfg.get("api_key", "")
-        if k and not k.startswith("***"):
-            return k
-        # 硅基流动 URL 自动用共享 key
-        base = cfg.get("base_url") or ""
-        if "siliconflow" in base and siliconflow_api_key:
-            return siliconflow_api_key
-        return existing_key
+        def resolve_key(cfg, existing_key):
+            """解析 API key：显式指定 > 硅基流动共享 key > 保留现有"""
+            k = cfg.get("api_key", "")
+            if k and not k.startswith("***"):
+                return k
+            # 硅基流动 URL 自动用共享 key
+            base = cfg.get("base_url") or ""
+            if "siliconflow" in base and siliconflow_api_key:
+                return siliconflow_api_key
+            return existing_key
 
-    def resolve_base_url(cfg, existing):
-        return cfg.get("base_url") or existing
+        def resolve_base_url(cfg, existing):
+            return cfg.get("base_url") or existing
 
-    # 更新 LLM
-    if llm_cfg.get("model"): llm_model = llm_cfg["model"]
-    llm_base_url = resolve_base_url(llm_cfg, llm_base_url)
-    llm_api_key = resolve_key(llm_cfg, llm_api_key)
+        # 更新 LLM
+        if llm_cfg.get("model"): llm_model = llm_cfg["model"]
+        llm_base_url = resolve_base_url(llm_cfg, llm_base_url)
+        llm_api_key = resolve_key(llm_cfg, llm_api_key)
 
-    # 更新 Embedding
-    if emb_cfg.get("model"): embedding_model_name = emb_cfg["model"]
-    embedding_base_url = resolve_base_url(emb_cfg, embedding_base_url)
-    embedding_api_key = resolve_key(emb_cfg, embedding_api_key)
+        # 更新 Embedding
+        if emb_cfg.get("model"): embedding_model_name = emb_cfg["model"]
+        embedding_base_url = resolve_base_url(emb_cfg, embedding_base_url)
+        embedding_api_key = resolve_key(emb_cfg, embedding_api_key)
 
-    # 更新 Reranker
-    if rer_cfg.get("model"): RERANKER_MODEL = rer_cfg["model"]
-    reranker_base_url = resolve_base_url(rer_cfg, reranker_base_url)
-    reranker_api_key = resolve_key(rer_cfg, reranker_api_key)
+        # 更新 Reranker
+        if rer_cfg.get("model"): RERANKER_MODEL = rer_cfg["model"]
+        reranker_base_url = resolve_base_url(rer_cfg, reranker_base_url)
+        reranker_api_key = resolve_key(rer_cfg, reranker_api_key)
 
-    print(f"[配置更新] LLM: {llm_model} @ {llm_base_url}")
-    print(f"[配置更新] Embedding: {embedding_model_name} @ {embedding_base_url}")
-    print(f"[配置更新] Reranker: {RERANKER_MODEL} @ {reranker_base_url}")
+        print(f"[配置更新] LLM: {llm_model} @ {llm_base_url}")
+        print(f"[配置更新] Embedding: {embedding_model_name} @ {embedding_base_url}")
+        print(f"[配置更新] Reranker: {RERANKER_MODEL} @ {reranker_base_url}")
 
-    # Reinitialize components
-    errors = []
-    try:
-        from langchain_openai import ChatOpenAI
-        llm = ChatOpenAI(
-            openai_api_key=llm_api_key,
-            openai_api_base=llm_base_url,
-            model_name=llm_model,
-            temperature=0.3,
-            request_timeout=120,
-            max_retries=2,
-        )
-    except Exception as e:
-        errors.append(f"LLM 初始化失败: {e}")
+        # Reinitialize components
+        errors = []
+        try:
+            from langchain_openai import ChatOpenAI
+            llm = ChatOpenAI(
+                openai_api_key=llm_api_key,
+                openai_api_base=llm_base_url,
+                model_name=llm_model,
+                temperature=0.3,
+                request_timeout=120,
+                max_retries=2,
+            )
+        except Exception as e:
+            errors.append(f"LLM 初始化失败: {e}")
 
-    try:
-        embeddings = OpenAICompatibleEmbeddings()
-    except Exception as e:
-        errors.append(f"Embedding 初始化失败: {e}")
+        try:
+            embeddings = OpenAICompatibleEmbeddings()
+        except Exception as e:
+            errors.append(f"Embedding 初始化失败: {e}")
 
-    try:
-        reranker = OpenAICompatibleReranker(model=RERANKER_MODEL)
-    except Exception as e:
-        errors.append(f"Reranker 初始化失败: {e}")
+        try:
+            reranker = OpenAICompatibleReranker(model=RERANKER_MODEL)
+        except Exception as e:
+            errors.append(f"Reranker 初始化失败: {e}")
 
-    # Persist to .env
-    try:
-        save_env_file()
-    except Exception as e:
-        errors.append(f"保存 .env 失败: {e}")
+        # Persist to .env
+        try:
+            save_env_file()
+        except Exception as e:
+            errors.append(f"保存 .env 失败: {e}")
 
     if errors:
         return {"status": "partial", "message": "; ".join(errors)}
@@ -1889,7 +1892,7 @@ async def init_knowledge_base(force_rebuild: bool = False, kb_id: str = "default
         else:
             return {"status": "error", "message": f"知识库 '{kb_id}' 初始化失败，请确保材料文件夹中有支持的文件"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="服务器内部错误，请查看日志了解详情")
 
 SUPPORTED_EXTENSIONS = {".pdf", ".pptx", ".docx", ".md"}
 
@@ -1917,7 +1920,7 @@ async def list_materials(kb_id: str = "default"):
         files.sort(key=lambda f: f["modified"], reverse=True)
         return {"status": "success", "files": files}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="服务器内部错误，请查看日志了解详情")
 
 
 @app.post("/materials/upload")
@@ -1940,6 +1943,9 @@ async def upload_material(files: List[UploadFile] = File(...), kb_id: str = "def
                 continue
             dest = os.path.join(materials_path, safe_name)
             content = await upload_file.read()
+            if len(content) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+                errors.append(f"{safe_name}: 文件大小超过 {MAX_UPLOAD_SIZE_MB}MB 限制")
+                continue
             with open(dest, "wb") as f:
                 f.write(content)
             uploaded.append(safe_name)
@@ -1951,7 +1957,7 @@ async def upload_material(files: List[UploadFile] = File(...), kb_id: str = "def
         index_result = await asyncio.to_thread(index_new_files, kb_id=kb_id)
         return {"status": "success", "uploaded": uploaded, "index": index_result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="服务器内部错误，请查看日志了解详情")
 
 
 @app.post("/materials/index")
@@ -1961,7 +1967,7 @@ async def index_materials(kb_id: str = "default"):
         result = await asyncio.to_thread(index_new_files, kb_id=kb_id)
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="服务器内部错误，请查看日志了解详情")
 
 
 @app.delete("/materials/{filename}")
@@ -1988,7 +1994,7 @@ async def delete_material(filename: str, kb_id: str = "default"):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="服务器内部错误，请查看日志了解详情")
 
 
 @app.post("/ask/stream")
@@ -2125,7 +2131,7 @@ async def ask_question(query: Query, background_tasks: BackgroundTasks):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="服务器内部错误，请查看日志了解详情")
 
 @app.get("/v1/models")
 async def list_models():
@@ -2169,7 +2175,6 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
 
     # 流式输出
     if request.stream:
-        import time as _time
         chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
         def openai_stream_generator():
@@ -2194,7 +2199,7 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
                         chunk = {
                             "id": chat_id,
                             "object": "chat.completion.chunk",
-                            "created": int(_time.time()),
+                            "created": int(time.time()),
                             "model": request.model,
                             "choices": [{"index": 0, "delta": {"content": event["data"]}, "finish_reason": None}],
                         }
@@ -2204,7 +2209,7 @@ async def chat_completions(request: OpenAIChatRequest, background_tasks: Backgro
                 chunk = {
                     "id": chat_id,
                     "object": "chat.completion.chunk",
-                    "created": int(_time.time()),
+                    "created": int(time.time()),
                     "model": request.model,
                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                 }

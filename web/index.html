@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>个人知识库</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:8001 https://api.siliconflow.cn; img-src 'self' data:;">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
@@ -97,7 +98,7 @@
 
             <!-- 聊天区域 -->
             <div class="chat" id="chat">
-                <div class="chat-messages" id="chatMessages">
+                <div class="chat-messages" id="chatMessages" aria-live="polite" aria-atomic="false">
                     <!-- 欢迎页 -->
                     <div class="welcome" id="welcome">
                         <div class="welcome-glow"></div>
@@ -463,7 +464,7 @@
     </div>
 
     <!-- Toast 通知 -->
-    <div class="toast-container" id="toastContainer"></div>
+    <div class="toast-container" id="toastContainer" aria-live="polite" role="status"></div>
 
     <script src="app.js?v=5"></script>
 </body>

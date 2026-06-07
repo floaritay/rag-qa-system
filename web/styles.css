@@ -1080,38 +1080,7 @@ body {
     font-weight: 600;
 }
 
-/* Settings tabs */
-.settings-tabs {
-    display: flex;
-    border-bottom: 1px solid var(--border-subtle);
-    padding: 0 24px;
-    gap: 4px;
-}
-
-.settings-tab {
-    padding: 10px 16px;
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--text-secondary);
-    font-family: var(--font-body);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: color var(--t-fast), border-color var(--t-fast);
-    white-space: nowrap;
-}
-
-.settings-tab:hover {
-    color: var(--text-primary);
-}
-
-.settings-tab.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-}
-
-/* Settings body / tab panels */
+/* Settings body */
 .settings-body {
     padding: 20px 24px 24px;
     overflow-y: auto;
@@ -1119,17 +1088,6 @@ body {
     min-height: 0;
 }
 
-.tab-panel {
-    display: none;
-}
-
-.tab-panel.active {
-    display: block;
-}
-
-#tabModel {
-    /* 由外层 .settings-body 统一管理滚动，避免双重滚动条 */
-}
 
 .setting-group {
     margin-bottom: 20px;
@@ -1236,50 +1194,6 @@ body {
     opacity: 0.5;
     cursor: not-allowed;
     transform: none;
-}
-
-/* Provider Toggle */
-.provider-toggle {
-    display: flex;
-    background: var(--bg-elevated);
-    border-radius: var(--r-lg);
-    padding: 3px;
-    margin-bottom: 20px;
-    border: 1px solid var(--border-default);
-}
-
-.provider-btn {
-    flex: 1;
-    padding: 8px 16px;
-    border: none;
-    border-radius: var(--r-md);
-    background: transparent;
-    color: var(--text-secondary);
-    font-family: var(--font-body);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--t-fast);
-}
-
-.provider-btn.active {
-    background: var(--accent);
-    color: var(--text-inverse);
-    box-shadow: 0 2px 8px rgba(200, 121, 65, 0.3);
-}
-
-.provider-btn:not(.active):hover {
-    color: var(--text-primary);
-    background: var(--bg-hover);
-}
-
-/* Provider Panels */
-.provider-panel {
-    display: none;
-}
-
-.provider-panel.active {
-    display: block;
 }
 
 /* Mini Toggle (per-model provider switch) */

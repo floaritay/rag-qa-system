@@ -11,6 +11,22 @@ echo         Personal Knowledge Base
 echo  ========================================
 echo.
 
+:: Check Python is available
+where python >nul 2>&1
+if %errorlevel% neq 0 (
+    echo  [ERROR] Python not found in PATH.
+    echo  Please install Python 3.10+ and add it to PATH.
+    pause
+    exit /b 1
+)
+
+:: Check .env exists
+if not exist "%ROOT%\.env" (
+    echo  [WARNING] .env file not found.
+    echo  Please copy .env.example to .env and configure your API key.
+    echo.
+)
+
 :: Kill any existing processes on ports 8080 and 8001
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8080.*LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8001.*LISTENING" 2^>nul') do taskkill /F /PID %%a >nul 2>&1
